@@ -1,0 +1,76 @@
+[package]
+name = "hel"
+version = "0.1.0"
+edition = "2021"
+description = "HEL — Hermes Expression Language: a deterministic, auditable expression language & parser, AST, builtin registry and evaluator."
+readme = "README.md"
+license = "Apache-2.0"
+
+# Replace the placeholder values below with your actual repository/homepage information.
+repository = "https://github.com/Sing-Security/hel"
+homepage = "https://github.com/Sing-Security/hel"
+documentation = "https://docs.rs/hel"
+# Provide real author info before publishing
+authors = ["Joshua Fath <joshuaf@lfam.us>"]
+keywords = ["expression-language", "parser", "evaluator", "ast", "pest", "hel"]
+# Categories should be chosen from the crates.io category list. Adjust as needed.
+categories = ["parsing", "development-tools"]
+# Whether to allow publishing; keep true for crates.io publication.
+publish = true
+
+# Files to include in the published crate. This is intentionally conservative:
+# include only the source, README, license, examples and manifest. Adjust if you
+# need to ship additional files.
+exclude = [
+  "target/**",
+  ".github/**",
+  "hel/target/**",
+  "**/*.rs.bk",
+  "ci/**",
+  "hel-template/**",
+  "examples/local-only/**",
+  "target/doc/**",
+]
+
+# If you prefer an exclusion list instead of explicit includes, comment the `include`
+# above and use `exclude` to avoid shipping build artifacts, CI files, or local-only templates.
+# exclude = [
+#   "target/**",
+#   ".github/**",
+#   "hel/target/**",
+#   "**/*.rs.bk",
+#   "ci/**",
+# ]
+
+[dependencies]
+pest = "2.0"
+pest_derive = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+# Keep features minimal and additive. If you later gate optional deps, add them here.
+default = []
+
+[badges]
+# You can update these once you have CI/docs set up.
+# Example:
+# travis-ci = { repository = "<your-org>/hel", branch = "main" }
+
+[package.metadata.docs.rs]
+# Ensure docs.rs builds docs without optional features that are hard to satisfy.
+all-features = false
+# If the crate needs a specific rustdoc flags or target, set them here:
+# rustdoc-args = ["--cfg", "docsrs"]
+
+# Optional metadata for consumers and CI tooling (replace placeholders as appropriate).
+[package.metadata]
+# Recommended: keep a short changelog or release notes pointer.
+changelog = "CHANGELOG.md"
+# Optional: structured metadata your internal tools might use
+# hel = { stable = true, compatibility = "semver" }
+
+# End of file

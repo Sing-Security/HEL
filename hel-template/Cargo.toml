@@ -1,0 +1,40 @@
+[package]
+name = "hel-closed-builtin-template"
+version = "0.1.0"
+edition = "2024"
+description = "Template crate demonstrating how to implement and register a closed (product-specific) BuiltinsProvider for the HEL engine."
+authors = ["Your Company <dev@example.com>"]
+# Closed / product crates are not published to crates.io
+publish = false
+# Proprietary / closed-source indicator (record policy rather than a public license)
+license = "Proprietary"
+
+[lib]
+name = "hel_closed_builtins_template"
+crate-type = ["rlib"]
+
+[dependencies]
+# Local dependency on the hel crate in this repository. Adjust the path if you move the template.
+# When using this template inside the detached `hel` repo, the hel crate is one directory up.
+hel = { path = "../", version = "0.1.0" }
+
+# Small, commonly useful dependency for structured metadata or tests.
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+# Recommendations for tests/examples
+tempfile = "3"
+
+# Metadata useful to hosts and for registry snapshotting.
+# The evaluator/registry can record this metadata for audit evidence.
+[package.metadata.hel_builtins]
+# Canonical namespace used by this provider (must match BuiltinsProvider::namespace())
+namespace = "acme"
+# Provider version (use semver or VCS revision)
+provider_version = "0.1.0"
+# Short description for audit records / registry snapshots
+description = "ACME product closed builtins provider (example/template)."
+# List of builtin functions exposed by this provider (names only, e.g., "score.compute")
+builtins = ["acme.score", "acme.enrich"]
+
+# End of template Cargo.toml

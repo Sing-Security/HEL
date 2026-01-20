@@ -1,0 +1,43 @@
+WHITESPACE      = _{ " " | "\t" | "\n" | "\r" }
+
+condition       =  { logical_or }
+
+logical_or      =  { logical_and ~ (or_op ~ logical_and)* }
+logical_and     =  { term ~ (and_op ~ term)* }
+term            =  { comparison_term | primary }
+
+comparison_term = { comparison | primary }
+
+primary         = { parenthesized | literal | function_call | attribute_access | symbolic | variable | identifier }
+
+parenthesized   = { "(" ~ condition ~ ")" }
+
+literal         = { list_literal | map_literal | string_literal | float_literal | number_literal | boolean_literal }
+
+// List literal: [1, 2, 3] or ["a", "b", "c"]
+list_literal    = { "[" ~ (primary ~ ("," ~ primary)*)? ~ "]" }
+
+// Map literal: {"key": value, "key2": value2}
+map_literal     = { "{" ~ (map_entry ~ ("," ~ map_entry)*)? ~ "}" }
+map_entry       = { string_literal ~ ":" ~ primary }
+
+string_literal  = { "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+float_literal   = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+number_literal  = { ("0x" ~ ASCII_HEX_DIGIT+) | ASCII_DIGIT+ }
+boolean_literal = { "true" | "false" }
+
+identifier      = @{ (ASCII_ALPHANUMERIC | "_")+ }
+variable        = @{ "$" ~ (ASCII_ALPHANUMERIC | "_")+ }
+symbolic        = @{ "%" ~ (ASCII_ALPHANUMERIC | "_")+ }
+
+// Function call: func(args) or namespace.func(args)
+function_call   = { identifier ~ ("." ~ identifier)? ~ "(" ~ (primary ~ ("," ~ primary)*)? ~ ")" }
+
+// Attribute access: object.field (but not followed by parentheses)
+attribute_access = { identifier ~ ("." ~ identifier)+ ~ !("(") }
+
+comparison      = { primary ~ comparator ~ primary }
+comparator      = { "==" | "!=" | ">=" | "<=" | ">" | "<" | "CONTAINS" | "IN" }
+
+or_op           = _{ "||" | "OR" | "or" }
+and_op          = _{ "&&" | "AND" | "and" }

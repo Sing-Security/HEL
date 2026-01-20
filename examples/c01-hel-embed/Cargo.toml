@@ -1,0 +1,19 @@
+[package]
+name = "c01-hel-embed"
+version = "0.1.0"
+edition = "2024"
+description = "Minimal example demonstrating embedding the `hel` crate: parser, resolver, builtin registry, and evaluate_with_trace usage."
+authors = ["Your Name <you@example.com>"]
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+# Local path to the hel crate in this workspace. Adjust if you move the example.
+hel = { path = "../.." }
+
+# Small convenience deps for examples/tests (optional)
+serde = { version = "1.0", features = ["derive"] }
+
+[package.metadata]
+# Helpful metadata for documentation and audit in examples
+example = "c01-hel-embed"

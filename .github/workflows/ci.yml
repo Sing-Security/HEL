@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Format, Lint, Test, Package Dry-Run
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install Rust toolchain (stable)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Show rustc / cargo versions
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Run rustfmt (check)
+        working-directory: hel
+        run: |
+          cargo fmt --all -- --check
+
+      - name: Run clippy (deny warnings)
+        working-directory: hel
+        run: |
+          # Enable all targets/features so CI is strict; adjust flags if needed for large workspaces.
+          cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        working-directory: hel
+        run: |
+          # Run tests with all features enabled to exercise public API; adjust flags if needed.
+          cargo test --workspace --all-features -- --nocapture
+
+      - name: Build docs (optional)
+        working-directory: hel
+        run: |
+          # Quick docs build to catch doc build errors (docs.rs will also run this).
+          cargo doc --no-deps
+
+      - name: cargo package dry-run
+        working-directory: hel
+        run: |
+          # Validate what would be published to crates.io
+          cargo package --allow-dirty
+
+      - name: cargo publish dry-run
+        working-directory: hel
+        run: |
+          # Dry-run publish — does not require credentials and validates metadata/registry checks.
+          cargo publish --dry-run
