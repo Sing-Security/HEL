@@ -12,7 +12,7 @@ homepage = "https://github.com/Sing-Security/hel"
 documentation = "https://docs.rs/hel"
 # Provide real author info before publishing
 authors = ["Joshua Fath <joshuaf@lfam.us>"]
-keywords = ["expression-language", "parser", "evaluator", "ast", "pest", "hel"]
+keywords = ["expression-language", "dsl", "ast", "pest", "interpreter"]
 # Categories should be chosen from the crates.io category list. Adjust as needed.
 categories = ["parsing", "development-tools"]
 # Whether to allow publishing; keep true for crates.io publication.
