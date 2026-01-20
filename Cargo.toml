@@ -14,7 +14,7 @@ documentation = "https://docs.rs/hel"
 authors = ["Joshua Fath <joshuaf@lfam.us>"]
 keywords = ["expression-language", "dsl", "ast", "pest", "interpreter"]
 # Categories should be chosen from the crates.io category list. Adjust as needed.
-categories = ["Compilers", "Parsing tools","Development tools"]
+categories = ["compilers", "parsing", "development-tools"]
 # Whether to allow publishing; keep true for crates.io publication.
 publish = true
 
