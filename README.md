@@ -1,66 +1,120 @@
-# HEL Crate — Parser and Evaluator
+# HEL — Hermes Expression Language (Rust crate)
 
-Status: OPEN (Apache-2.0)  
+Status: OPEN — Apache-2.0  
 SPDX-License-Identifier: Apache-2.0
 
-Purpose
-- HEL (Hermes Expression Language) is an auditable, deterministic expression language used to encode security rules and domain packages.
-- This crate provides the open reference implementation used by the Hermes rule engine: lexer/parser (pest-based), AST definitions, type/schema helpers, built-in registry interfaces, and a deterministic evaluator implementation suitable for embedding in higher-level services.
+Overview
+- HEL (Hermes Expression Language) is a small, deterministic, auditable expression language and reference implementation.
+- This crate implements the open core: a pest-based parser, a compact typed AST, deterministic evaluator(s), a pluggable builtins registry, schema/package loaders for domain types, and a trace facility that produces stable, auditable evaluation traces.
+- The crate is intentionally product-agnostic: domain-specific or proprietary built-ins and rule packs should be implemented and shipped separately and injected at runtime via the builtins provider interface.
 
-Scope and boundaries
-- In-scope (open): parsing, AST, type/schema helpers, evaluation primitives, the open builtins registry interface, and package/schema loaders for HEL domain packages.
-- Out-of-scope (closed / product): product business rules, proprietary scoring algorithms, vendor fingerprint heuristics, and any product-specific built-ins. Those belong in product crates or closed built-ins loaded via the builtins provider interface.
+Goals
+- Determinism: evaluation order and iteration are stable (stable maps, deterministic traces).
+- Auditability: fine-grained atom-level traces that show resolved inputs and atom results.
+- Extensibility: runtime injection of domain built-ins via a clear provider/registry API.
+- Minimal surface area: provide primitives (parser, AST, evaluator, trace, schema loader) rather than a monolithic runtime.
 
-High-level architecture
-- Parsing: pest-based grammar (hel.pest). The crate exposes a parser type for unit testing and integration.
-- AST & types: typed AST nodes (booleans, numbers/floats, identifiers, attribute access, comparisons, boolean combinators, lists/maps, function calls). Schema support and package manifests live under `schema/`.
-- Evaluation: deterministic, pure evaluation against an immutable context with trace support exported from `trace`.
-- Builtins: pluggable via the `BuiltinsProvider` / `BuiltinsRegistry` interfaces so closed/proprietary functions can be injected at runtime.
+What this crate provides (public capabilities)
+- Parsing
+  - A pest grammar (`hel.pest`) and parser type `HelParser`.
+  - Top-level parse helper: `parse_rule(condition: &str) -> AstNode`.
+- AST
+  - `AstNode` variants: `Bool`, `String`, `Number`, `Float`, `Identifier`, `Attribute`, `Comparison`, `And`, `Or`, `ListLiteral`, `MapLiteral`, `FunctionCall`.
+  - Comparators supported: `==`, `!=`, `>`, `>=`, `<`, `<=`, `CONTAINS`, `IN`.
+- Evaluation
+  - Resolver-based evaluation: `evaluate_with_resolver(condition: &str, resolver: &dyn HelResolver) -> Result<bool, EvalError>`.
+  - Evaluation with builtins: `evaluate_with_context(condition: &str, resolver: &dyn HelResolver, builtins: &builtins::BuiltinsRegistry)`.
+  - Runtime `Value` model: `Null`, `Bool`, `String(Arc<str>)`, `Number(f64)`, `List(Vec<Value>)`, `Map(BTreeMap<Arc<str>, Value>)`.
+  - `HelResolver` trait for embedding hosts to supply attribute values (object.field).
+- Builtins and extensibility
+  - `BuiltinsProvider` trait and `BuiltinsRegistry` for namespace-aware function dispatch.
+  - `BuiltinFn` type: pure, deterministic functions that map argument `Value`s to a `Result<Value, EvalError>`.
+  - `CoreBuiltinsProvider` included with a small set of generic functions (`core.len`, `core.contains`, `core.upper`, `core.lower`).
+- Trace & audit
+  - `evaluate_with_trace(condition, resolver, Option<&BuiltinsRegistry>) -> Result<EvalTrace, EvalError>`.
+  - `EvalTrace` contains a deterministic list of `AtomTrace` entries and a sorted list of `facts_used()`.
+  - Pretty-print helpers to produce deterministic, human-readable traces.
+- Schema and package system
+  - Schema parser and in-memory `Schema` representation (`FieldType`, `TypeDef`, `FieldDef`).
+  - Package manifest type `PackageManifest` (`hel-package.toml`), `SchemaPackage`, and `PackageRegistry` for loading and resolving packages into a `TypeEnvironment`.
+  - Deterministic package resolution and type merging with clear collision detection.
 
-Determinism & safety
-- The public evaluator is designed to be pure (no global mutable state or I/O during evaluation).
-- `unsafe` usage is to be minimized, justified, and wrapped in safe APIs. Libraries in the ForgeCore platform should avoid exposing `unsafe` to consumers.
-- The crate does not currently depend on arbitrary regex engines; avoid regex constructs that could cause super-linear behavior. Any pattern-matching builtins must be implemented with bounded execution characteristics.
+Quick usage examples
+- Parse an expression into an AST:
+```/dev/null/example_parse.rs#L1-20
+use hel::parse_rule;
 
-Error handling
-- Parse errors surface structured diagnostics with span information where possible.
-- Type and schema errors are reported as explicit error types; evaluation returns `Result<..., Error>`; libraries must avoid panics in public APIs.
+let ast = parse_rule("binary.format == \"elf\" AND security.nx_enabled == true");
+// `ast` is an `AstNode` representing the parsed expression
+```
 
-API surface (snapshot)
-- Modules exported by the crate:
-  - `hel::schema` — Package manifest, SchemaPackage loader, type definitions and helpers.
-    - key types: `PackageManifest`, `SchemaPackage`, `Schema`, `TypeEnvironment` (see `schema/package.rs`).
-  - `hel::builtins` — Builtin provider interfaces.
-    - key traits/types: `BuiltinsProvider`, `BuiltinsRegistry`, `CoreBuiltinsProvider`, `BuiltinFn`.
-  - `hel::trace` — Evaluation tracing helpers.
-    - key items: `EvalTrace`, `evaluate_with_trace`, `AtomTrace`.
-  - Public data fact types (examples found in `src/lib.rs`):
-    - `BinaryInfo`, `SecurityFlags`, `SectionInfo`, `ImportInfo`, `TaintFlow`, `FunctionCall`, `MemoryOperation`, `SymQueryRequest`.
-  - Parser type (pest): `HelParser` (generated via `pest_derive`).
-- Note: the crate exposes types and interfaces rather than a single high-level `Compiler`/`Evaluator` type in the current code. Do not rely on symbols that are not present in `src/lib.rs`.
+- Evaluate with a simple resolver:
+```/dev/null/example_eval.rs#L1-40
+use hel::{evaluate_with_resolver, HelResolver, Value};
 
-Documentation fixes and removals
-- Remove or replace the code snippet that references `Compiler::default().compile(...)` and `Evaluator::default().eval(...)` with a conceptual usage paragraph. The code snippet in the existing README refers to types that are not exported from the current crate surface (no `Compiler`/`Evaluator` symbols were found).
-- Remove the assertive statement that "Regex engine uses RE2-like semantics" — the crate currently does not depend on a regex engine. Replace with guidance: "Avoid unbounded regexes; any pattern-match builtins must ensure bounded, deterministic evaluation."
-- Ensure the README does not include any product names, product-specific rule examples, or policy logic. Platform crates must stay product-agnostic.
+struct MyResolver;
+impl HelResolver for MyResolver {
+    fn resolve_attr(&self, object: &str, field: &str) -> Option<Value> {
+        match (object, field) {
+            ("binary", "format") => Some(Value::String("elf".into())),
+            ("security", "nx_enabled") => Some(Value::Bool(true)),
+            _ => None,
+        }
+    }
+}
 
-Examples and how-to (conceptual)
-- The crate provides parsing and evaluation primitives and a trace-based evaluator for integration. Typical integration steps:
-  1. Load HEL expression text (source).
-  2. Use the parser to produce an AST (parser is pest-based).
-  3. Create an immutable evaluation context (domain facts are represented via the schema types; packages can be loaded via `SchemaPackage::from_directory`).
-  4. Evaluate the AST with the builtins registry (open builtins) or a `BuiltinsProvider` implementation for closed builtins. The crate exports `evaluate_with_trace` to obtain both the evaluation result and an execution trace suitable for audits.
+let resolver = MyResolver;
+let result = evaluate_with_resolver(r#"binary.format == "elf""#, &resolver)?;
+assert!(result);
+```
 
-Extensibility
-- `BuiltinsProvider` is the supported extension point for closed or product-specific functions (loaded at runtime by the embedding product).
-- Domain packages: `hel-package.toml` + schema files are supported; packages are loaded via the schema package loader and merged into a `Schema` object.
+- Evaluate with builtins and capture a trace:
+```/dev/null/example_trace.rs#L1-60
+use hel::{evaluate_with_trace, HelResolver, builtins::BuiltinsRegistry, builtins::CoreBuiltinsProvider};
 
-Licensing
-- This crate and its open built-ins are Apache-2.0. Closed builtins and product rule packs must be delivered separately and must not be included in the open crate.
+let mut registry = BuiltinsRegistry::new();
+registry.register(&CoreBuiltinsProvider)?;
 
-Contribution guidelines
-- Follow GEMINI rules: determinism, auditability, minimal `unsafe`, explicit error types, and strict separation of platform vs. product logic.
-- When adding built-ins to the open crate: ensure they are generic, deterministic, and useful across products. Vendor- or product-specific built-ins must be implemented in closed crates and injected via `BuiltinsProvider`.
+struct MyResolver;
+impl HelResolver for MyResolver {
+    fn resolve_attr(&self, object: &str, field: &str) -> Option<hel::Value> { /* ... */ unimplemented!() }
+}
 
-Further reading
-- See the local documentation (`docs/USAGE.md`, `docs/SCHEMA.md`) and the crate's `src/schema` module for package/schema examples and manifest format.
+let trace = evaluate_with_trace("core.len([1,2,3]) == 3", &MyResolver, Some(&registry))?;
+println!("{}", trace.pretty_print()); // deterministic, human-friendly audit trail
+```
+
+Design notes and important details
+- Determinism
+  - Internal maps use `BTreeMap` and lists are iterated stably to ensure deterministic behavior across runs.
+  - Traces and `facts_used()` are sorted to make audit logs stable.
+- Pure builtins
+  - Builtins must be pure and deterministic; they must not perform unbounded I/O or rely on global mutable state. The registry enforces namespace isolation and stable ordering.
+- Error handling
+  - Public evaluation functions return `Result<..., EvalError>`. `EvalError` covers parse errors, type mismatches, unknown attributes, and invalid operations.
+- Limits & omissions
+  - The core language focuses on declarative expressions and comparisons. It does not provide arithmetic operators (`+`, `-`, `*`, `/`) beyond numeric comparisons in the current implementation.
+  - Function calls require a `BuiltinsRegistry` in the evaluation context. Without it, invoking `FunctionCall` yields an `InvalidOperation` error.
+  - The crate exposes primitives (parser, AST, evaluator, trace, schema loader) and intentionally does not provide a single monolithic "compiler" or product-specific rule engine.
+- Performance & safety
+  - The evaluator uses `f64` for runtime numbers; integer literal parsing persists `u64` in the AST then converts as needed to `Value::Number(f64)`.
+  - Avoid unbounded regexes in any custom builtins. The crate itself does not depend on a regex engine; pattern-match builtins must ensure bounded, deterministic execution.
+
+Documentation and where to look next
+- Read the `src` modules to get API-level details:
+  - `hel::schema` — package manifest, `SchemaPackage`, schema parsing helpers.
+  - `hel::builtins` — provider/registry API and `CoreBuiltinsProvider`.
+  - `hel::trace` — trace capture and pretty-print helpers.
+  - `hel::parse_rule` and the AST in `src/lib.rs`.
+- Local docs: `docs/USAGE.md` and `docs/SCHEMA.md` (examples and schema/package format).
+- Tests in `src/*` demonstrate intended semantics and edge-case behavior (NaN handling, builtins, trace order, package registry collision detection).
+
+Contributing
+- Follow these principles when contributing:
+  - Preserve determinism and auditability.
+  - Keep open built-ins generic and product-agnostic.
+  - When adding features that affect evaluation semantics, add deterministic tests and trace-based examples.
+  - Avoid exposing `unsafe` in public APIs unless strictly necessary and justified with clear documentation.
+
+License
+- Apache-2.0. Open builtins included here must follow the same license. Product-specific or proprietary builtins and rule packs belong in separate crates and should be injected through `BuiltinsProvider`.
