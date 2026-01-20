@@ -1,10 +1,10 @@
-# HEL — Hermes Expression Language (Rust crate)
+# HEL — Heuristics Expression Language
 
 Status: OPEN — Apache-2.0  
 SPDX-License-Identifier: Apache-2.0
 
 Overview
-- HEL (Hermes Expression Language) is a small, deterministic, auditable expression language and reference implementation.
+- HEL (Internally Hermes Expression Language) is a small, deterministic, auditable expression language and reference implementation.
 - This crate implements the open core: a pest-based parser, a compact typed AST, deterministic evaluator(s), a pluggable builtins registry, schema/package loaders for domain types, and a trace facility that produces stable, auditable evaluation traces.
 - The crate is intentionally product-agnostic: domain-specific or proprietary built-ins and rule packs should be implemented and shipped separately and injected at runtime via the builtins provider interface.
 
