@@ -3,43 +3,224 @@
 Status: OPEN — Apache-2.0  
 SPDX-License-Identifier: Apache-2.0
 
-Overview
+## Overview
+
 - HEL (Internally Hermes Expression Language) is a small, deterministic, auditable expression language and reference implementation.
 - This crate implements the open core: a pest-based parser, a compact typed AST, deterministic evaluator(s), a pluggable builtins registry, schema/package loaders for domain types, and a trace facility that produces stable, auditable evaluation traces.
 - The crate is intentionally product-agnostic: domain-specific or proprietary built-ins and rule packs should be implemented and shipped separately and injected at runtime via the builtins provider interface.
 
-Goals
+## Quick Start
+
+HEL provides a simple, high-level API for expression validation and evaluation:
+
+### Basic Expression Validation
+
+```rust
+use hel::validate_expression;
+
+// Validate syntax without evaluation
+let expr = r#"binary.arch == "x86_64" AND security.nx == false"#;
+validate_expression(expr)?;  // Returns Ok(()) or detailed parse error
+```
+
+### Expression Evaluation with Facts
+
+```rust
+use hel::{evaluate, FactsEvalContext, Value};
+
+// Create evaluation context with facts
+let mut ctx = FactsEvalContext::new();
+ctx.add_fact("binary.arch", Value::String("x86_64".into()));
+ctx.add_fact("security.nx", Value::Bool(false));
+
+// Evaluate expression
+let expr = r#"binary.arch == "x86_64" AND security.nx == false"#;
+let result = evaluate(expr, &ctx)?;  // Returns true
+```
+
+### Script Files with Let Bindings
+
+HEL supports `.hel` script files with reusable let bindings:
+
+```rust
+use hel::{evaluate_script, FactsEvalContext, Value};
+
+let mut ctx = FactsEvalContext::new();
+ctx.add_fact("manifest.permissions", Value::List(vec![
+    Value::String("READ_SMS".into()),
+    Value::String("SEND_SMS".into()),
+]));
+ctx.add_fact("binary.entropy", Value::Number(8.0));
+
+let script = r#"
+    # Define reusable sub-expressions
+    let has_sms_perms = 
+      manifest.permissions CONTAINS "READ_SMS" AND
+      manifest.permissions CONTAINS "SEND_SMS"
+    
+    let has_obfuscation = binary.entropy > 7.5
+    
+    # Final boolean expression
+    has_sms_perms AND has_obfuscation
+"#;
+
+let result = evaluate_script(script, &ctx)?;  // Returns true
+```
+
+## Goals
 - Determinism: evaluation order and iteration are stable (stable maps, deterministic traces).
 - Auditability: fine-grained atom-level traces that show resolved inputs and atom results.
 - Extensibility: runtime injection of domain built-ins via a clear provider/registry API.
 - Minimal surface area: provide primitives (parser, AST, evaluator, trace, schema loader) rather than a monolithic runtime.
 
-What this crate provides (public capabilities)
-- Parsing
-  - A pest grammar (`hel.pest`) and parser type `HelParser`.
-  - Top-level parse helper: `parse_rule(condition: &str) -> AstNode`.
-- AST
-  - `AstNode` variants: `Bool`, `String`, `Number`, `Float`, `Identifier`, `Attribute`, `Comparison`, `And`, `Or`, `ListLiteral`, `MapLiteral`, `FunctionCall`.
-  - Comparators supported: `==`, `!=`, `>`, `>=`, `<`, `<=`, `CONTAINS`, `IN`.
-- Evaluation
-  - Resolver-based evaluation: `evaluate_with_resolver(condition: &str, resolver: &dyn HelResolver) -> Result<bool, EvalError>`.
-  - Evaluation with builtins: `evaluate_with_context(condition: &str, resolver: &dyn HelResolver, builtins: &builtins::BuiltinsRegistry)`.
-  - Runtime `Value` model: `Null`, `Bool`, `String(Arc<str>)`, `Number(f64)`, `List(Vec<Value>)`, `Map(BTreeMap<Arc<str>, Value>)`.
-  - `HelResolver` trait for embedding hosts to supply attribute values (object.field).
-- Builtins and extensibility
-  - `BuiltinsProvider` trait and `BuiltinsRegistry` for namespace-aware function dispatch.
-  - `BuiltinFn` type: pure, deterministic functions that map argument `Value`s to a `Result<Value, EvalError>`.
-  - `CoreBuiltinsProvider` included with a small set of generic functions (`core.len`, `core.contains`, `core.upper`, `core.lower`).
-- Trace & audit
-  - `evaluate_with_trace(condition, resolver, Option<&BuiltinsRegistry>) -> Result<EvalTrace, EvalError>`.
-  - `EvalTrace` contains a deterministic list of `AtomTrace` entries and a sorted list of `facts_used()`.
-  - Pretty-print helpers to produce deterministic, human-readable traces.
-- Schema and package system
-  - Schema parser and in-memory `Schema` representation (`FieldType`, `TypeDef`, `FieldDef`).
-  - Package manifest type `PackageManifest` (`hel-package.toml`), `SchemaPackage`, and `PackageRegistry` for loading and resolving packages into a `TypeEnvironment`.
-  - Deterministic package resolution and type merging with clear collision detection.
+## What this crate provides (public capabilities)
 
-Quick usage examples
+### Expression Validation and Parsing
+- **Expression Validation**: `validate_expression(expr: &str) -> Result<(), HelError>` - validate syntax without evaluation
+- **Expression Parsing**: `parse_expression(expr: &str) -> Result<Expression, HelError>` - parse into AST
+- **Script Parsing**: `parse_script(script: &str) -> Result<Script, HelError>` - parse `.hel` files with let bindings
+
+### Expression Evaluation
+- **Simple Evaluation**: `evaluate(expr: &str, context: &FactsEvalContext) -> Result<bool, HelError>` - evaluate with facts
+- **Script Evaluation**: `evaluate_script(script: &str, context: &FactsEvalContext) -> Result<bool, HelError>` - evaluate scripts with let bindings
+- **Advanced Evaluation**: Resolver-based evaluation via `evaluate_with_resolver()` and `evaluate_with_context()`
+
+### Context and Data
+- **FactsEvalContext**: Simple key-value store for facts (e.g., "binary.arch" -> "x86_64")
+- **HelResolver** trait: Custom attribute resolution for advanced integrations
+- **Value** type: `Null`, `Bool`, `String`, `Number`, `List`, `Map`
+
+### Error Handling
+- **HelError**: Enhanced error type with line/column information for parse errors
+- **EvalError**: Evaluation-time errors (type mismatches, unknown attributes, etc.)
+- Clear error messages for common mistakes
+
+### Legacy APIs
+- **Low-level Parsing**: `parse_rule(condition: &str) -> AstNode` - direct AST construction
+- **AST**: `AstNode` variants: `Bool`, `String`, `Number`, `Float`, `Identifier`, `Attribute`, `Comparison`, `And`, `Or`, `ListLiteral`, `MapLiteral`, `FunctionCall`
+- **Comparators**: `==`, `!=`, `>`, `>=`, `<`, `<=`, `CONTAINS`, `IN`
+
+### Builtins and Extensibility
+- `BuiltinsProvider` trait and `BuiltinsRegistry` for namespace-aware function dispatch
+- `BuiltinFn` type: pure, deterministic functions that map argument `Value`s to a `Result<Value, EvalError>`
+- `CoreBuiltinsProvider` included with generic functions (`core.len`, `core.contains`, `core.upper`, `core.lower`)
+
+### Trace & Audit
+- `evaluate_with_trace(condition, resolver, Option<&BuiltinsRegistry>) -> Result<EvalTrace, EvalError>`
+- `EvalTrace` contains deterministic list of `AtomTrace` entries and sorted list of `facts_used()`
+- Pretty-print helpers for deterministic, human-readable traces
+
+### Schema and Package System
+- Schema parser and in-memory `Schema` representation (`FieldType`, `TypeDef`, `FieldDef`)
+- Package manifest type `PackageManifest` (`hel-package.toml`), `SchemaPackage`, and `PackageRegistry`
+- Deterministic package resolution and type merging with collision detection
+
+## Integration with Rule Engines
+
+HEL is designed to be embedded in rule engines and security analysis tools. Here's how to integrate HEL into your application:
+
+### Example: Malware Detection Rule Engine
+
+```rust
+use hel::{evaluate_script, FactsEvalContext, Value};
+use std::fs;
+
+struct MalwareRule {
+    name: String,
+    description: String,
+    script_path: String,
+}
+
+fn check_sample(sample: &BinarySample, rules: &[MalwareRule]) -> Vec<String> {
+    // Build facts from sample
+    let mut ctx = FactsEvalContext::new();
+    ctx.add_fact("binary.arch", Value::String(sample.arch.clone().into()));
+    ctx.add_fact("binary.entropy", Value::Number(sample.entropy));
+    ctx.add_fact("manifest.permissions", Value::List(
+        sample.permissions.iter()
+            .map(|p| Value::String(p.clone().into()))
+            .collect()
+    ));
+    ctx.add_fact("strings.count", Value::Number(sample.string_count as f64));
+    
+    // Evaluate all rules
+    let mut detections = Vec::new();
+    for rule in rules {
+        // Load and evaluate .hel script
+        let script = fs::read_to_string(&rule.script_path)
+            .expect("Failed to load rule");
+        
+        match evaluate_script(&script, &ctx) {
+            Ok(true) => {
+                println!("✓ Rule matched: {}", rule.name);
+                detections.push(rule.name.clone());
+            }
+            Ok(false) => {
+                println!("  Rule did not match: {}", rule.name);
+            }
+            Err(e) => {
+                eprintln!("✗ Rule evaluation error in {}: {}", rule.name, e);
+            }
+        }
+    }
+    
+    detections
+}
+
+struct BinarySample {
+    arch: String,
+    entropy: f64,
+    permissions: Vec<String>,
+    string_count: usize,
+}
+```
+
+### Example Rule File: `android-malware.hel`
+
+```hel
+# Check for suspicious SMS permissions
+let has_sms_perms = 
+  manifest.permissions CONTAINS "READ_SMS" AND
+  manifest.permissions CONTAINS "SEND_SMS"
+
+# Check for code obfuscation indicators
+let has_obfuscation = 
+  binary.entropy > 7.5 OR
+  strings.count < 10
+
+# Final detection logic
+has_sms_perms AND has_obfuscation
+```
+
+### Best Practices for Integration
+
+1. **Validation Before Deployment**: Always validate rule scripts before loading them:
+   ```rust
+   let script = fs::read_to_string("rule.hel")?;
+   validate_expression(&script)?;  // Catch syntax errors early
+   ```
+
+2. **Error Handling**: Distinguish between parse errors (rule bugs) and evaluation errors (data issues):
+   ```rust
+   match evaluate_script(&script, &ctx) {
+       Ok(result) => { /* process result */ }
+       Err(e) if matches!(e.kind, ErrorKind::ParseError) => {
+           eprintln!("Rule has syntax error: {}", e);
+       }
+       Err(e) => {
+           eprintln!("Evaluation error: {}", e);
+       }
+   }
+   ```
+
+3. **Performance**: Parse scripts once and reuse the AST:
+   ```rust
+   let parsed = parse_script(&script)?;
+   // Store parsed.bindings and parsed.final_expr
+   // Reuse for multiple evaluations
+   ```
+
+## Advanced Usage Examples
 - Parse an expression into an AST:
 ```/dev/null/example_parse.rs#L1-20
 use hel::parse_rule;
