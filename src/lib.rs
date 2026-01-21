@@ -703,18 +703,19 @@ impl FactsEvalContext {
 
     /// Create a context from JSON data
     /// 
+    /// **Note**: This method is currently not implemented and will return an empty context.
+    /// A full implementation would require the `serde_json` dependency.
+    /// 
     /// The JSON should be an object where keys are fact names (e.g., "binary.arch")
     /// and values are the fact values.
-    pub fn from_json(json: &str) -> Result<Self, HelError> {
-        // For now, provide a basic implementation
-        // A full JSON parser would require serde_json dependency
-        let ctx = Self::new();
-        
-        // Basic parsing support for simple cases
-        // In a production implementation, this would use serde_json
-        let _parsed = json.trim();
-        
-        Ok(ctx)
+    /// 
+    /// # TODO
+    /// 
+    /// Implement proper JSON parsing once serde_json is added as a dependency.
+    pub fn from_json(_json: &str) -> Result<Self, HelError> {
+        // Placeholder implementation
+        // TODO: Implement proper JSON parsing with serde_json
+        Ok(Self::new())
     }
 }
 
@@ -770,6 +771,10 @@ pub struct Script {
 /// Parse and validate a .hel script file (may contain multiple expressions, let bindings)
 ///
 /// Scripts support let bindings for reusable sub-expressions and a final boolean expression.
+///
+/// **Implementation Note**: The current parser uses heuristics to determine expression boundaries,
+/// which works for most cases but may have edge cases with complex multi-line expressions.
+/// Future improvements could include a more robust state machine-based parser.
 ///
 /// # Examples
 ///
