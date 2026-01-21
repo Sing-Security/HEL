@@ -805,20 +805,51 @@ pub fn parse_script(script: &str) -> Result<Script, HelError> {
             
             if let Some(eq_pos) = rest.find('=') {
                 let name = rest[..eq_pos].trim();
-                let mut expr_str = rest[eq_pos + 1..].trim().to_string();
+                let expr_after_eq = rest[eq_pos + 1..].trim();
+                let mut expr_str = String::new();
+                
+                // Start expression string if there's content after '='
+                if !expr_after_eq.is_empty() {
+                    expr_str = expr_after_eq.to_string();
+                }
                 
                 // Handle multi-line let expressions
+                // Continue collecting lines until we hit another "let" or a potential final expression
                 i += 1;
                 while i < lines.len() {
                     let next_line = lines[i].trim();
+                    
+                    // Skip empty lines and comments
                     if next_line.is_empty() || next_line.starts_with('#') {
                         i += 1;
                         continue;
                     }
-                    if next_line.starts_with("let ") || (!next_line.contains('=') && !expr_str.is_empty()) {
+                    
+                    // If we hit another "let", stop collecting
+                    if next_line.starts_with("let ") {
                         break;
                     }
-                    expr_str.push(' ');
+                    
+                    // If this line looks like it could be a standalone final expression
+                    // (doesn't start with an operator), check if we have collected enough
+                    if !expr_str.is_empty() && 
+                       !next_line.starts_with("AND") && 
+                       !next_line.starts_with("OR") &&
+                       !next_line.starts_with("and") &&
+                       !next_line.starts_with("or") &&
+                       !next_line.starts_with("&&") &&
+                       !next_line.starts_with("||") {
+                        // Try to parse what we have so far
+                        if parse_expression(&expr_str).is_ok() {
+                            // We have a complete expression, stop here
+                            break;
+                        }
+                    }
+                    
+                    // Add this line to the expression
+                    if !expr_str.is_empty() {
+                        expr_str.push(' ');
+                    }
                     expr_str.push_str(next_line);
                     i += 1;
                 }
@@ -838,7 +869,9 @@ pub fn parse_script(script: &str) -> Result<Script, HelError> {
             while i < lines.len() {
                 let next_line = lines[i].trim();
                 if !next_line.is_empty() && !next_line.starts_with('#') {
-                    expr_str.push(' ');
+                    if !expr_str.is_empty() {
+                        expr_str.push(' ');
+                    }
                     expr_str.push_str(next_line);
                 }
                 i += 1;
