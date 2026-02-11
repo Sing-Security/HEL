@@ -15,7 +15,7 @@ fn bench_parse_heap(c: &mut Criterion) {
 
 #[cfg(feature = "arena")]
 fn bench_parse_arena(c: &mut Criterion) {
-    c.bench_function("parse_rule_arena", |b| {
+    c.bench_function("parse_rule_arena_no_reset", |b| {
         let parser = ArenaParser::new();
         b.iter(|| {
             let ast = parser.parse_rule(black_box(r#"x == 10 AND y > 5"#));
@@ -39,11 +39,11 @@ fn bench_parse_arena_with_reset(c: &mut Criterion) {
 fn bench_evaluate_heap(c: &mut Criterion) {
     c.bench_function("evaluate_heap", |b| {
         let mut ctx = FactsEvalContext::new();
-        ctx.add_fact("x", Value::Number(10.0));
-        ctx.add_fact("y", Value::Number(20.0));
+        ctx.add_fact("vars.x", Value::Number(10.0));
+        ctx.add_fact("vars.y", Value::Number(20.0));
         
         b.iter(|| {
-            let result = hel::evaluate(black_box(r#"x == 10 AND y > 5"#), black_box(&ctx))
+            let result = hel::evaluate(black_box(r#"vars.x == 10 AND vars.y > 5"#), black_box(&ctx))
                 .expect("eval failed");
             black_box(result);
         });
@@ -52,14 +52,14 @@ fn bench_evaluate_heap(c: &mut Criterion) {
 
 #[cfg(feature = "arena")]
 fn bench_evaluate_arena(c: &mut Criterion) {
-    c.bench_function("evaluate_arena", |b| {
+    c.bench_function("evaluate_arena_no_reset", |b| {
         let mut ctx = FactsEvalContext::new();
-        ctx.add_fact("x", Value::Number(10.0));
-        ctx.add_fact("y", Value::Number(20.0));
+        ctx.add_fact("vars.x", Value::Number(10.0));
+        ctx.add_fact("vars.y", Value::Number(20.0));
         let parser = ArenaParser::new();
         
         b.iter(|| {
-            let result = evaluate_arena(black_box(r#"x == 10 AND y > 5"#), black_box(&ctx), black_box(&parser))
+            let result = evaluate_arena(black_box(r#"vars.x == 10 AND vars.y > 5"#), black_box(&ctx), black_box(&parser))
                 .expect("eval failed");
             black_box(result);
         });
@@ -70,12 +70,12 @@ fn bench_evaluate_arena(c: &mut Criterion) {
 fn bench_evaluate_arena_with_reset(c: &mut Criterion) {
     c.bench_function("evaluate_arena_with_reset", |b| {
         let mut ctx = FactsEvalContext::new();
-        ctx.add_fact("x", Value::Number(10.0));
-        ctx.add_fact("y", Value::Number(20.0));
+        ctx.add_fact("vars.x", Value::Number(10.0));
+        ctx.add_fact("vars.y", Value::Number(20.0));
         let mut parser = ArenaParser::new();
         
         b.iter(|| {
-            let result = evaluate_arena(black_box(r#"x == 10 AND y > 5"#), black_box(&ctx), black_box(&parser))
+            let result = evaluate_arena(black_box(r#"vars.x == 10 AND vars.y > 5"#), black_box(&ctx), black_box(&parser))
                 .expect("eval failed");
             black_box(result);
             parser.reset();
@@ -89,15 +89,15 @@ fn bench_batch_heap(c: &mut Criterion) {
     for size in [10, 50, 100].iter() {
         group.bench_with_input(BenchmarkId::new("heap", size), size, |b, &size| {
             let mut ctx = FactsEvalContext::new();
-            ctx.add_fact("x", Value::Number(10.0));
-            ctx.add_fact("y", Value::Number(20.0));
+            ctx.add_fact("vars.x", Value::Number(10.0));
+            ctx.add_fact("vars.y", Value::Number(20.0));
             
             let expressions = vec![
-                r#"x == 10"#,
-                r#"y > 5"#,
-                r#"x < y"#,
-                r#"x != 20"#,
-                r#"y >= 20"#,
+                r#"vars.x == 10"#,
+                r#"vars.y > 5"#,
+                r#"vars.x < vars.y"#,
+                r#"vars.x != 20"#,
+                r#"vars.y >= 20"#,
             ];
             
             b.iter(|| {
@@ -122,16 +122,16 @@ fn bench_batch_arena(c: &mut Criterion) {
     for size in [10, 50, 100].iter() {
         group.bench_with_input(BenchmarkId::new("arena", size), size, |b, &size| {
             let mut ctx = FactsEvalContext::new();
-            ctx.add_fact("x", Value::Number(10.0));
-            ctx.add_fact("y", Value::Number(20.0));
+            ctx.add_fact("vars.x", Value::Number(10.0));
+            ctx.add_fact("vars.y", Value::Number(20.0));
             let mut parser = ArenaParser::new();
             
             let expressions = vec![
-                r#"x == 10"#,
-                r#"y > 5"#,
-                r#"x < y"#,
-                r#"x != 20"#,
-                r#"y >= 20"#,
+                r#"vars.x == 10"#,
+                r#"vars.y > 5"#,
+                r#"vars.x < vars.y"#,
+                r#"vars.x != 20"#,
+                r#"vars.y >= 20"#,
             ];
             
             b.iter(|| {

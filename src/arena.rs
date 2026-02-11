@@ -166,9 +166,11 @@ impl ArenaParser {
     ///
     /// # Panics
     ///
-    /// Panics if the input fails to parse.
+    /// Panics if the input fails to parse. For production use, consider using
+    /// `parse_expression()` which returns a `Result` instead.
     pub fn parse_rule<'a>(&'a self, input: &str) -> &'a AstNode<'a> {
-        let mut pairs = HelParser::parse(Rule::condition, input).expect("parse error");
+        let mut pairs = HelParser::parse(Rule::condition, input)
+            .unwrap_or_else(|e| panic!("Failed to parse expression: {}", e));
         self.build_ast_arena(pairs.next().unwrap())
     }
 
@@ -268,7 +270,10 @@ impl ArenaParser {
                 let num_str = pair.as_str();
                 match parse_number(num_str) {
                     Some(n) => AstNode::Number(n),
-                    None => panic!("Failed to parse number literal: '{}'", num_str),
+                    None => panic!(
+                        "Failed to parse number literal: '{}'. Expected decimal or hexadecimal (0x prefix) integer",
+                        num_str
+                    ),
                 }
             }
 
