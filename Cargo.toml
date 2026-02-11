@@ -47,13 +47,16 @@ pest = "2.0"
 pest_derive = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
+bumpalo = { version = "3", features = ["collections"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [features]
 # Keep features minimal and additive. If you later gate optional deps, add them here.
-default = []
+default = ["arena"]
+arena = ["bumpalo"]
 
 [badges]
 # You can update these once you have CI/docs set up.
@@ -72,5 +75,9 @@ all-features = false
 changelog = "CHANGELOG.md"
 # Optional: structured metadata your internal tools might use
 # hel = { stable = true, compatibility = "semver" }
+
+[[bench]]
+name = "arena_bench"
+harness = false
 
 # End of file
