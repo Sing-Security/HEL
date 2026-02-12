@@ -67,6 +67,52 @@ let script = r#"
 let result = evaluate_script(script, &ctx)?;  // Returns true
 ```
 
+### Arena Allocation for High Performance
+
+For high-throughput scenarios (e.g., evaluating hundreds of rules per request), HEL provides an arena allocator that dramatically improves performance by reducing allocation overhead and improving cache locality:
+
+```rust
+use hel::arena::{ArenaParser, evaluate_arena};
+use hel::{FactsEvalContext, Value};
+
+let mut ctx = FactsEvalContext::new();
+ctx.add_fact("binary.arch", Value::String("x86_64".into()));
+ctx.add_fact("security.nx", Value::Bool(false));
+
+// Create arena parser (can be reused across many evaluations)
+let parser = ArenaParser::new();
+
+let expr = r#"binary.arch == "x86_64" AND security.nx == false"#;
+let result = evaluate_arena(expr, &ctx, &parser)?;  // Returns true
+```
+
+**When to use arena allocation:**
+- Evaluating many expressions in a tight loop (e.g., forward-chaining rule engines)
+- Expression lifetime is known and bounded (e.g., single request processing)
+- Memory pressure from many small heap allocations is a concern
+
+**Performance benefits:**
+- **Faster allocation**: O(1) bump pointer allocation vs global allocator overhead
+- **Better cache locality**: AST nodes are adjacent in memory
+- **Batch deallocation**: Dropping the arena frees all nodes at once
+
+**Example: Reusing arena for multiple evaluations:**
+
+```rust
+use hel::arena::{ArenaParser, evaluate_arena};
+
+let mut parser = ArenaParser::new();
+
+// Evaluate first expression
+let result1 = evaluate_arena(expr1, &ctx, &parser)?;
+
+// Reset arena to reuse memory
+parser.reset();
+
+// Evaluate second expression (reuses arena memory)
+let result2 = evaluate_arena(expr2, &ctx, &parser)?;
+```
+
 ## Goals
 - Determinism: evaluation order and iteration are stable (stable maps, deterministic traces).
 - Auditability: fine-grained atom-level traces that show resolved inputs and atom results.
@@ -84,6 +130,7 @@ let result = evaluate_script(script, &ctx)?;  // Returns true
 - **Simple Evaluation**: `evaluate(expr: &str, context: &FactsEvalContext) -> Result<bool, HelError>` - evaluate with facts
 - **Script Evaluation**: `evaluate_script(script: &str, context: &FactsEvalContext) -> Result<bool, HelError>` - evaluate scripts with let bindings
 - **Advanced Evaluation**: Resolver-based evaluation via `evaluate_with_resolver()` and `evaluate_with_context()`
+- **Arena Evaluation**: `arena::evaluate_arena(expr: &str, context: &FactsEvalContext, parser: &ArenaParser)` - high-performance arena-allocated evaluation
 
 ### Context and Data
 - **FactsEvalContext**: Simple key-value store for facts (e.g., "binary.arch" -> "x86_64")
