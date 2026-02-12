@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Arena Allocator**: New `arena` module with arena-based memory allocation for AST nodes
+  - `ArenaParser` struct for building arena-allocated ASTs
+  - `AstNode<'arena>` enum with lifetime parameter for arena-allocated nodes
+  - `evaluate_arena()` function for high-performance expression evaluation
+  - `evaluate_with_resolver_arena()` and `evaluate_with_context_arena()` for advanced use cases
+  - ArenaParser can be reset and reused for multiple evaluations
+- **Performance**: Arena allocation provides significant performance improvements:
+  - O(1) bump pointer allocation vs global allocator overhead
+  - Improved cache locality with adjacent memory layout
+  - Batch deallocation - drop arena to free all nodes at once
+- **Feature Flag**: New `arena` feature (enabled by default) for arena allocator
+- **Benchmarks**: Added criterion benchmarks comparing heap vs arena allocation performance
+  - Parse benchmarks for both approaches
+  - Evaluation benchmarks for both approaches
+  - Batch evaluation benchmarks simulating rule engine workloads
+
+### Dependencies
+
+- Added `bumpalo` 3.x with `collections` feature for arena allocation
+
 ## [0.2.0] - 2026-01-21
 
 ### Added
