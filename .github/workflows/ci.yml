@@ -22,23 +22,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Cache cargo registry and build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
+      # Caches the registry and `target/` itself.
       - name: Install Rust toolchain (stable)
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
-          toolchain: stable
-          profile: minimal
-          override: true
+          components: clippy, rustfmt
 
       - name: Show rustc / cargo versions
         run: |
@@ -46,36 +34,32 @@ jobs:
           cargo --version
 
       - name: Run rustfmt (check)
-        working-directory: hel
         run: |
           cargo fmt --all -- --check
+          (cd hel-template && cargo fmt --check)
+          (cd examples/c01-hel-embed && cargo fmt --check)
 
       - name: Run clippy (deny warnings)
-        working-directory: hel
-        run: |
-          # Enable all targets/features so CI is strict; adjust flags if needed for large workspaces.
-          cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run tests
-        working-directory: hel
-        run: |
-          # Run tests with all features enabled to exercise public API; adjust flags if needed.
-          cargo test --workspace --all-features -- --nocapture
+      - name: Run tests (default features)
+        run: cargo test --all-features -- --nocapture
 
-      - name: Build docs (optional)
-        working-directory: hel
+      - name: Run tests (no default features)
+        run: cargo test --no-default-features -- --nocapture
+
+      # hel-template and examples/c01-hel-embed are separate packages, so neither the
+      # clippy nor the test step above reaches them.
+      - name: Build and test the repo-local crates
         run: |
-          # Quick docs build to catch doc build errors (docs.rs will also run this).
-          cargo doc --no-deps
+          (cd hel-template && cargo test)
+          (cd examples/c01-hel-embed && cargo run --features acme_provider)
+
+      - name: Build docs
+        run: cargo doc --no-deps
 
       - name: cargo package dry-run
-        working-directory: hel
-        run: |
-          # Validate what would be published to crates.io
-          cargo package --allow-dirty
+        run: cargo package --allow-dirty
 
       - name: cargo publish dry-run
-        working-directory: hel
-        run: |
-          # Dry-run publish — does not require credentials and validates metadata/registry checks.
-          cargo publish --dry-run
+        run: cargo publish --dry-run
