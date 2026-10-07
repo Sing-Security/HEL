@@ -3,6 +3,8 @@
 //! This module provides evaluation tracing to explain why a rule matched or didn't match.
 //! It captures atom-level comparisons with resolved values for deterministic audit trails.
 
+use std::fmt;
+
 use crate::{AstNode, Comparator, EvalContext, EvalError, Value};
 
 /// Trace of a single comparison atom in a rule
@@ -36,12 +38,14 @@ pub struct EvalTrace {
     /// Atom-level traces (in evaluation order)
     pub atoms: Vec<AtomTrace>,
 
-    /// Fact paths that were accessed during evaluation (stored as HashSet internally)
+    /// Fact paths read during evaluation. Kept as a set to deduplicate; read them back
+    /// sorted via [`EvalTrace::facts_used`].
     facts_used_set: std::collections::HashSet<String>,
 }
 
 impl EvalTrace {
     /// Create a new empty trace
+    #[must_use]
     pub fn new() -> Self {
         Self {
             result: false,
@@ -66,6 +70,7 @@ impl EvalTrace {
     }
 
     /// Get facts used (sorted for determinism)
+    #[must_use]
     pub fn facts_used(&self) -> Vec<String> {
         let mut facts: Vec<String> = self.facts_used_set.iter().cloned().collect();
         facts.sort();
@@ -89,10 +94,12 @@ impl Default for EvalTrace {
 /// # Errors
 ///
 /// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
-/// [`EvalError::UnknownAttribute`] if the resolver returns `None` for an attribute
-/// the expression reads, [`EvalError::InvalidOperation`] if the expression calls a
-/// function that `builtins` does not define, and [`EvalError::TypeMismatch`] if an
-/// operand has the wrong type for its operator.
+/// [`EvalError::InvalidOperation`] if the expression calls a function that `builtins`
+/// does not define — or if `builtins` is `None` and the expression calls one at all —
+/// and [`EvalError::TypeMismatch`] if an operand has the wrong type for its operator.
+///
+/// An attribute the resolver answers `None` for is not an error: it resolves to
+/// [`Value::Null`] and appears in the trace as such.
 ///
 /// # Examples
 ///
@@ -174,14 +181,11 @@ fn evaluate_comparison_with_trace(
     ctx: &EvalContext,
     trace: &mut EvalTrace,
 ) -> Result<bool, EvalError> {
-    // Evaluate left and right nodes
-    let left_val = eval_node_to_value_with_context(left, ctx)?;
-    let right_val = eval_node_to_value_with_context(right, ctx)?;
+    let left_val = crate::eval_node_to_value_with_context(left, ctx)?;
+    let right_val = crate::eval_node_to_value_with_context(right, ctx)?;
 
-    // Perform comparison
     let result = crate::compare_new_values(&left_val, &right_val, op);
 
-    // Record atom trace
     let atom = AtomTrace {
         left: node_to_string(left),
         op,
@@ -241,7 +245,7 @@ fn value_to_string(value: &Value) -> String {
     }
 }
 
-/// Helper: return a stable textual operator for a `Comparator`.
+// Stable textual form of a `Comparator`, used by both `Display` impls below.
 fn comparator_to_str(op: Comparator) -> &'static str {
     match op {
         Comparator::Eq => "==",
@@ -255,9 +259,7 @@ fn comparator_to_str(op: Comparator) -> &'static str {
     }
 }
 
-use std::fmt;
-
-/// Pretty-print a single atom trace (stable, deterministic)
+// Single-line, stable rendering of one comparison atom.
 impl fmt::Display for AtomTrace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -273,9 +275,7 @@ impl fmt::Display for AtomTrace {
     }
 }
 
-/// Pretty-print an EvalTrace as multi-line human-friendly output.
-/// Hosts and examples can call `trace.to_string()` or `trace.pretty_print()` to
-/// obtain deterministic, audit-friendly summaries.
+// Multi-line, human-readable rendering of a whole trace.
 impl fmt::Display for EvalTrace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Top-line: result
@@ -293,21 +293,40 @@ impl fmt::Display for EvalTrace {
     }
 }
 
-/// Convenience method to get a pretty-printed string (avoids allocations for simple prints)
 impl EvalTrace {
     /// Return a human-friendly, deterministic multi-line string of the trace.
+    ///
+    /// Equivalent to `self.to_string()`; provided as a named method so call sites read
+    /// as an intent rather than a conversion.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hel::trace::{AtomTrace, EvalTrace};
+    /// use hel::Comparator;
+    ///
+    /// let mut trace = EvalTrace::new();
+    /// trace.add_atom(AtomTrace {
+    ///     left: "binary.arch".to_string(),
+    ///     op: Comparator::Eq,
+    ///     right: "\"x86_64\"".to_string(),
+    ///     resolved_left_value: Some("x86_64".to_string()),
+    ///     resolved_right_value: Some("x86_64".to_string()),
+    ///     atom_result: true,
+    /// });
+    /// trace.set_result(true);
+    ///
+    /// let text = trace.pretty_print();
+    /// assert!(text.contains("Result: true"));
+    /// assert!(text.contains("binary.arch == \"x86_64\""));
+    /// ```
+    #[must_use]
     pub fn pretty_print(&self) -> String {
         use std::fmt::Write as FmtWrite;
         let mut out = String::new();
-        let _ = write!(&mut out, "{}", self); // uses Display impl above
+        let _ = write!(&mut out, "{}", self);
         out
     }
-}
-
-/// Re-export eval_node_to_value_with_context from parent module
-/// (We need this for trace evaluation)
-fn eval_node_to_value_with_context(node: &AstNode, ctx: &EvalContext) -> Result<Value, EvalError> {
-    crate::eval_node_to_value_with_context(node, ctx)
 }
 
 // region:    --- Tests

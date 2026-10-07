@@ -135,29 +135,44 @@ fn test_function_call_in_complex_expression() {
 	let provider = CoreBuiltinsProvider;
 	registry.register(&provider).expect("registration failed");
 
-	// First test each part individually
-	let cond1 = r#"core.len(["a", "b"]) == 2"#;
-	let res1 = evaluate_with_context(cond1, &resolver, &registry).expect("eval failed");
-	eprintln!("Part 1: {} => {}", cond1, res1);
-	assert!(res1, "Part 1 should be true");
-
-	let cond2 = r#"core.contains(["x", "y", "z"], "y") == true"#;
-	let res2 = evaluate_with_context(cond2, &resolver, &registry).expect("eval failed");
-	eprintln!("Part 2: {} => {}", cond2, res2);
-	assert!(res2, "Part 2 should be true");
-
-	// Test complex expression with multiple function calls and operators
+	// AND of two calls
 	let condition = r#"core.len(["a", "b"]) == 2 AND core.contains(["x", "y", "z"], "y") == true"#;
-	let result = evaluate_with_context(condition, &resolver, &registry);
-	if let Err(e) = &result {
-		eprintln!("Evaluation error: {}", e);
-	}
-	let result = result.expect("evaluation failed");
-	eprintln!("Combined: {} => {}", condition, result);
-	assert!(result, "Complex expression with multiple function calls should work");
+	let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
+	assert!(result, "AND of two function calls should be true");
 
-	// Test with OR
+	// The false half of an AND of calls
+	let condition = r#"core.len(["a", "b"]) == 2 AND core.contains(["x"], "y") == true"#;
+	let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
+	assert!(!result, "AND with a false call should be false");
+
+	// OR of two calls
 	let condition = r#"core.len(["a"]) == 5 OR core.upper("test") == "TEST""#;
 	let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
 	assert!(result, "OR expression should work with function calls");
+}
+
+#[test]
+fn test_core_contains_agrees_with_contains_operator() {
+	let resolver = EmptyResolver;
+	let mut registry = BuiltinsRegistry::new();
+	let provider = CoreBuiltinsProvider;
+	registry.register(&provider).expect("registration failed");
+
+	// `core.contains` and the language's `CONTAINS` must answer the same question the
+	// same way; they are two spellings of one operation, not two definitions of it.
+	for element in ["a", "b", "c"] {
+		let operator_form = format!(r#"["a", "b", "c"] CONTAINS "{}""#, element);
+		let builtin_form = format!(r#"core.contains(["a", "b", "c"], "{}") == true"#, element);
+
+		let via_operator = evaluate_with_context(&operator_form, &resolver, &registry).expect("operator form failed");
+		let via_builtin = evaluate_with_context(&builtin_form, &resolver, &registry).expect("builtin form failed");
+		assert_eq!(via_operator, via_builtin, "disagreement for {}", element);
+		assert!(via_operator);
+	}
+
+	// And they agree when the answer is "no".
+	let via_operator = evaluate_with_context(r#"["a"] CONTAINS "z""#, &resolver, &registry).expect("operator form failed");
+	let via_builtin = evaluate_with_context(r#"core.contains(["a"], "z") == true"#, &resolver, &registry).expect("builtin form failed");
+	assert_eq!(via_operator, via_builtin);
+	assert!(!via_operator);
 }

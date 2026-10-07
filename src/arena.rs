@@ -76,6 +76,7 @@ use pest::Parser;
 ///
 /// The `'arena` lifetime ties all nodes to their arena — no use-after-free possible.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum AstNode<'arena> {
     /// Boolean literal (true or false)
     Bool(bool),
@@ -147,6 +148,7 @@ pub struct ArenaParser {
 
 impl ArenaParser {
     /// Create a new arena parser
+    #[must_use]
     pub fn new() -> Self {
         Self {
             arena: Bump::new(),
@@ -323,19 +325,18 @@ impl ArenaParser {
                 let mut inner = pair.into_inner();
                 let first = inner.next().expect("Missing function name");
 
-                // Check if second element exists (namespace.function case)
-                let second = inner.next();
-                let (namespace, name, remaining_args): (Option<&str>, &str, _) = if second.is_some() {
-                    (
+                // A second identifier before the argument list means the call is namespaced
+                // (`ns.func(...)`); the grammar orders it first, so anything left after it is
+                // an argument.
+                let (namespace, name, remaining_args): (Option<&str>, &str, _) = match inner.next() {
+                    Some(second) => (
                         Some(self.arena.alloc_str(first.as_str())),
-                        self.arena.alloc_str(second.unwrap().as_str()),
+                        self.arena.alloc_str(second.as_str()),
                         inner,
-                    )
-                } else {
-                    (None, self.arena.alloc_str(first.as_str()), inner)
+                    ),
+                    None => (None, self.arena.alloc_str(first.as_str()), inner),
                 };
 
-                // Parse arguments from remaining items
                 let mut args = BumpVec::new_in(&self.arena);
                 for arg in remaining_args {
                     args.push(*self.build_ast_arena(arg));
@@ -432,19 +433,16 @@ impl<'a> ArenaEvalContext<'a> {
 
 /// Evaluate a HEL expression using arena-allocated AST
 ///
-/// This is a high-level convenience function that parses and evaluates
-/// an expression using arena allocation.
+/// High-level convenience function: parses `expr` into `parser`'s arena and evaluates it
+/// against the facts in `context`. Because the arena owns the AST, `parser` can be reused
+/// for the next expression after a call to [`ArenaParser::reset`].
 ///
-/// # Arguments
+/// # Errors
 ///
-/// * `expr` - The HEL expression string to evaluate
-/// * `context` - Facts context providing attribute values
-/// * `parser` - Arena parser (can be reused across calls)
-///
-/// # Returns
-///
-/// Returns `Ok(true)` if the expression evaluates to true, `Ok(false)` otherwise.
-/// Returns `Err` if parsing or evaluation fails.
+/// Returns [`HelError`] if `expr` is not a valid HEL expression, if an operand has the
+/// wrong type for its operator, or if the expression calls a function — built-ins are not
+/// available on this path. An attribute absent from `context` is *not* an error; it reads
+/// as [`Value::Null`].
 ///
 /// # Example
 ///
@@ -478,9 +476,12 @@ pub fn evaluate_arena(
 /// # Errors
 ///
 /// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
-/// [`EvalError::UnknownAttribute`] if the resolver returns `None` for an attribute
-/// the expression reads, and [`EvalError::TypeMismatch`] if an operand has the wrong
-/// type for its operator. The top-level expression must evaluate to a boolean.
+/// [`EvalError::InvalidOperation`] if it calls a function — this entry point holds no
+/// registry, so *any* call is an error — and [`EvalError::TypeMismatch`] if an operand
+/// has the wrong type for its operator or the expression as a whole is not a boolean.
+///
+/// An attribute the resolver answers `None` for is not an error: it resolves to
+/// [`Value::Null`], which simply fails whatever comparison it appears in.
 pub fn evaluate_with_resolver_arena(
     condition: &str,
     resolver: &dyn HelResolver,
@@ -501,11 +502,13 @@ pub fn evaluate_with_resolver_arena(
 /// # Errors
 ///
 /// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
-/// [`EvalError::UnknownAttribute`] if the resolver returns `None` for an attribute
-/// the expression reads, [`EvalError::InvalidOperation`] if the expression calls a
-/// function that `builtins` does not define or passes it arguments it rejects, and
-/// [`EvalError::TypeMismatch`] if an operand has the wrong type for its operator.
-/// The top-level expression must evaluate to a boolean.
+/// [`EvalError::InvalidOperation`] if the expression calls a function `builtins` does not
+/// define or passes one arguments it rejects, and [`EvalError::TypeMismatch`] if an
+/// operand has the wrong type for its operator or the expression as a whole is not a
+/// boolean.
+///
+/// An attribute the resolver answers `None` for is not an error: it resolves to
+/// [`Value::Null`], which simply fails whatever comparison it appears in.
 pub fn evaluate_with_context_arena(
     condition: &str,
     resolver: &dyn HelResolver,
@@ -582,8 +585,10 @@ fn eval_node_to_value_arena<'arena>(
         AstNode::Number(n) => Ok(Value::Number(*n as f64)),
         AstNode::Float(f) => Ok(Value::Number(*f)),
         AstNode::Identifier(s) => {
-            // In arena mode, we don't have variable bindings (yet)
-            // so identifiers are treated as string literals
+            // This evaluator has no variable bindings, so a bare identifier can only be a
+            // string literal. The heap evaluator consults its bindings first and falls back
+            // to the same interpretation, so an identifier only differs between the two
+            // when the expression is a script binding — which this path does not support.
             Ok(Value::String(Arc::from(*s)))
         }
         AstNode::Attribute { object, field } => Ok(ctx
@@ -605,21 +610,19 @@ fn eval_node_to_value_arena<'arena>(
             }
             Ok(Value::Map(map))
         }
-        // Handle boolean expressions (Comparison, And, Or)
+        // A condition nested as an operand is re-wrapped as a Value so that, say,
+        // `(a == 1) == true` has something to compare against.
         AstNode::Comparison { .. } | AstNode::And(_) | AstNode::Or(_) => {
-            // Evaluate as boolean and wrap in Value::Bool
             let bool_result = evaluate_ast_arena(node, ctx)?;
             Ok(Value::Bool(bool_result))
         }
         AstNode::FunctionCall { namespace, name, args } => {
-            // Evaluate arguments
             let arg_values: Result<Vec<Value>, EvalError> = args
                 .iter()
                 .map(|arg| eval_node_to_value_arena(arg, ctx))
                 .collect();
             let arg_values = arg_values?;
 
-            // Call built-in function if registry is available
             if let Some(builtins) = ctx.builtins {
                 let ns = namespace.unwrap_or("core");
                 builtins.call(ns, name, &arg_values)
@@ -954,9 +957,9 @@ mod tests {
         
         for expr in test_cases {
             let arena_result = evaluate_arena(expr, &ctx, &arena_parser)
-                .expect(&format!("arena eval failed for: {}", expr));
+                .unwrap_or_else(|e| panic!("arena eval failed for {}: {}", expr, e));
             let heap_result = crate::evaluate(expr, &ctx)
-                .expect(&format!("heap eval failed for: {}", expr));
+                .unwrap_or_else(|e| panic!("heap eval failed for {}: {}", expr, e));
             
             assert_eq!(
                 arena_result, heap_result,

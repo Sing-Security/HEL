@@ -1,16 +1,19 @@
-//! HEL — Heuristics Expression Language
+//! HEL — Heuristic Expression Language
 //!
-//! A deterministic, auditable expression language designed for security analysis,
-//! rule engines, and policy evaluation systems.
+//! A small, deterministic expression language for rule engines, security analysis and
+//! policy evaluation. You hand it a condition and a way to resolve attribute values; it
+//! hands back a boolean, and optionally a trace of how it got there.
 //!
 //! # Features
 //!
-//! - **Simple Expression Evaluation**: Validate and evaluate boolean expressions with facts
-//! - **Script Support**: Multi-line scripts with reusable let bindings
-//! - **Type-Safe**: Strong typing with compile-time guarantees
-//! - **Deterministic**: Stable evaluation order, reproducible results
-//! - **Auditable**: Comprehensive trace capture for debugging and compliance
-//! - **Extensible**: Plugin architecture for domain-specific built-in functions
+//! - **Deterministic**: stable evaluation order and sorted iteration, so the same inputs
+//!   always produce the same result and the same trace.
+//! - **Auditable**: [`trace`] records every atom's resolved inputs and outcome.
+//! - **Extensible**: domain-specific functions are injected at runtime through a
+//!   namespace-isolated [`builtins`] registry rather than compiled in.
+//! - **Scripts**: multi-line `.hel` scripts with reusable `let` bindings.
+//! - **Schemas**: optional declarations of domain types, loaded from `.hel` schema files
+//!   or `hel-package.toml` packages ([`schema`]).
 //!
 //! # Quick Start
 //!
@@ -59,49 +62,44 @@
 //! assert!(result);
 //! ```
 //!
-//! # Architecture
+//! # Where things live
 //!
-//! HEL is designed as a modular expression language with several key components:
+//! - This module — the grammar entry points, the [`AstNode`] tree, [`Value`], the
+//!   [`HelResolver`] trait, and the evaluators.
+//! - [`builtins`] — the function registry and the generic `core.*` functions.
+//! - [`trace`] — per-atom evaluation traces, for explaining why a rule matched.
+//! - [`schema`] — optional declarations of a domain's types and packages.
+//! - `arena` — an evaluator that allocates its AST in a reusable bump arena
+//!   (feature `arena`, on by default).
 //!
-//! ## Core Components
-//!
-//! - **Parser**: Pest-based grammar for parsing HEL expressions
-//! - **AST**: Compact Abstract Syntax Tree representation
-//! - **Evaluator**: Deterministic expression evaluation engine
-//! - **Resolver**: Trait-based attribute resolution for custom integrations
-//!
-//! ## Extension Systems
-//!
-//! - **Built-ins**: Pluggable function registry for domain-specific operations
-//! - **Schema**: Type definitions for data validation
-//! - **Packages**: Modular schema distribution and loading
-//! - **Trace**: Audit trail generation for compliance and debugging
+//! A condition becomes a boolean in three steps: the pest grammar produces a parse tree,
+//! that tree is lowered into an [`AstNode`], and the AST is walked against a resolver.
+//! Each step is separately reachable — [`validate_expression`] stops after the first,
+//! [`parse_expression`] after the second — so a host can check a rule without running it.
 //!
 //! # Advanced Usage
 //!
 //! ## Custom Built-in Functions
 //!
+//! A host adds vocabulary by implementing [`BuiltinsProvider`] and registering it; see
+//! that trait for a worked example. Once registered, the functions are callable from any
+//! expression evaluated with that registry:
+//!
 //! ```
-//! use hel::{BuiltinsProvider, BuiltinFn, Value, EvalError};
-//! use std::collections::BTreeMap;
-//! use std::sync::Arc;
+//! use hel::{BuiltinsRegistry, CoreBuiltinsProvider, FactsEvalContext, evaluate_with_context};
 //!
-//! struct MyProvider;
+//! let mut registry = BuiltinsRegistry::new();
+//! registry.register(&CoreBuiltinsProvider).expect("registration failed");
 //!
-//! impl BuiltinsProvider for MyProvider {
-//!     fn namespace(&self) -> &str { "custom" }
+//! let ctx = FactsEvalContext::new();
+//! assert!(evaluate_with_context(
+//!     r#"core.len(["a", "b"]) == 2"#,
+//!     &ctx,
+//!     &registry,
+//! ).expect("evaluation failed"));
 //!
-//!     fn get_builtins(&self) -> BTreeMap<String, BuiltinFn> {
-//!         let mut map = BTreeMap::new();
-//!         map.insert("double".to_string(), Arc::new(|args: &[Value]| {
-//!             match args.get(0) {
-//!                 Some(Value::Number(n)) => Ok(Value::Number(n * 2.0)),
-//!                 _ => Err(EvalError::InvalidOperation("Expected number".to_string())),
-//!             }
-//!         }) as BuiltinFn);
-//!         map
-//!     }
-//! }
+//! // Unregistered namespaces and function names fail rather than returning false.
+//! assert!(evaluate_with_context("nope.f()", &ctx, &registry).is_err());
 //! ```
 //!
 //! ## Evaluation Tracing
@@ -128,10 +126,48 @@
 //! assert!(trace.result);
 //! assert_eq!(trace.atoms.len(), 1);
 //! ```
+//!
+//! # Cargo features
+//!
+//! - `arena` (enabled by default) — adds the `arena` module, an evaluator that allocates AST nodes
+//!   in a bump arena and can reuse that memory across evaluations. It is a pure performance
+//!   win and removes no API.
+//!
+//! # Stability
+//!
+//! The public enums here ([`AstNode`], [`Comparator`], [`Value`], [`EvalError`],
+//! [`ErrorKind`], [`FieldType`], [`PackageError`]) are `#[non_exhaustive]`: matching them
+//! from another crate needs a `_` arm, which leaves room to add a variant without that
+//! being a breaking change. The structs that carry only public data are not, so they can
+//! still be built with a literal.
+//!
+//! With `default-features = false` the crate builds without [`bumpalo`](https://docs.rs/bumpalo)
+//! and the `arena` module is absent; the rest of the public API is unchanged, so a caller
+//! that does not need arena allocation pays for nothing.
+//!
+//! # Limits
+//!
+//! - The language is deliberately not Turing-complete. There is no arithmetic (`+`, `-`,
+//!   `*`, `/`), no negation, no assignment, and no control flow — a condition is built from
+//!   comparisons, `AND`/`OR`, literals, attribute access and function calls.
+//! - Numbers are `f64` at evaluation time. Integer literals are held as `u64` in the AST
+//!   and converted on use, so integers above 2^53 lose precision.
+//! - `NaN` comparisons are false, as in IEEE 754.
+//! - Calling a function without a [`builtins`] registry in the evaluation context is an
+//!   error, not a silent default.
+//! - There is no borrow or evaluator-level recursion limit; an expression is a fixed tree,
+//!   so evaluation terminates by construction, but a recursive custom built-in would not.
+
+#![warn(missing_docs)]
+#![forbid(unsafe_code)]
+
+// Include the README as crate documentation *only while doctests are being collected*.
+// That compiles and runs every `rust` block in README.md as part of `cargo test --doc`
+// without duplicating the README into the rendered API docs.
+#![cfg_attr(doctest, doc = include_str!("../README.md"))]
 
 use pest::iterators::Pair;
 use pest::Parser;
-use pest_derive::Parser;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -150,18 +186,29 @@ pub use trace::{evaluate_with_trace, AtomTrace as TraceAtom, EvalTrace};
 #[cfg(feature = "arena")]
 pub mod arena;
 
-/// HEL parser generated by Pest
+/// HEL parser generated by Pest, and the rule set it accepts
 ///
-/// This parser is automatically generated from the `hel.pest` grammar file.
-/// It provides the low-level parsing functionality for HEL expressions.
-///
-/// # Note
-///
-/// Most users should use the higher-level APIs like `validate_expression()`,
-/// `parse_expression()`, or `parse_script()` instead of using this parser directly.
-#[derive(Parser)]
-#[grammar = "hel.pest"]
-pub struct HelParser;
+/// Wrapped in its own module so `missing_docs` can be allowed over the derive output —
+/// `pest_derive` generates [`Rule`] and [`HelParser::parse`], neither of which can carry a
+/// doc comment. Everything else in this crate is documented, and keeping the lint live
+/// elsewhere is worth this one exemption.
+#[allow(missing_docs)]
+mod parser {
+    use pest_derive::Parser;
+
+    /// Parses HEL expressions according to the `hel.pest` grammar.
+    ///
+    /// This is the low-level entry point; most callers want
+    /// [`validate_expression`](super::validate_expression),
+    /// [`parse_expression`](super::parse_expression) or
+    /// [`parse_script`](super::parse_script), which return a `Result` rather than
+    /// panicking on malformed input.
+    #[derive(Parser)]
+    #[grammar = "hel.pest"]
+    pub struct HelParser;
+}
+
+pub use parser::{HelParser, Rule};
 
 /// Abstract Syntax Tree node representing a parsed HEL expression
 ///
@@ -183,6 +230,7 @@ pub struct HelParser;
 /// }
 /// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum AstNode {
     /// Boolean literal (true or false)
     Bool(bool),
@@ -257,6 +305,7 @@ pub enum AstNode {
 /// assert!(evaluate(r#"vars.list CONTAINS 1"#, &ctx).unwrap());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum Comparator {
     /// Equality (==)
     Eq,
@@ -308,6 +357,7 @@ pub enum Comparator {
 /// let n: Value = 42.5.into();
 /// ```
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Value {
     /// Null value (represents missing or undefined data)
     Null,
@@ -323,22 +373,45 @@ pub enum Value {
     Map(BTreeMap<Arc<str>, Value>),
 }
 
-/// Resolver interface for host integration
+/// Supplies attribute values to the evaluator.
 ///
-/// Products implement this trait to provide values for attribute access
-/// in HEL expressions. This decouples HEL from domain-specific facts.
+/// The host implements this so HEL never has to know where its data comes from: the
+/// evaluator asks for `object.field` and gets a [`Value`] back. That is the whole coupling
+/// between the language and the host's data model.
+///
+/// # Examples
+///
+/// ```
+/// use hel::{evaluate_with_resolver, HelResolver, Value};
+///
+/// struct MyResolver;
+///
+/// impl HelResolver for MyResolver {
+///     fn resolve_attr(&self, object: &str, field: &str) -> Option<Value> {
+///         match (object, field) {
+///             ("binary", "arch") => Some(Value::String("x86_64".into())),
+///             _ => None,
+///         }
+///     }
+/// }
+///
+/// assert!(evaluate_with_resolver(r#"binary.arch == "x86_64""#, &MyResolver).expect("evaluated"));
+/// ```
 pub trait HelResolver {
-    /// Resolve an attribute path (object.field) to a value
+    /// Resolve one `object.field` attribute, or `None` if the host has no such value.
     ///
-    /// Returns `Some(Value)` if the attribute exists, `None` if missing.
-    /// Missing attributes are treated as `Null` by the evaluator.
+    /// `None` is not an error: the evaluator substitutes [`Value::Null`], so a comparison
+    /// against a missing attribute is simply false. Return `Some(Value::Null)` instead if
+    /// you need to distinguish "absent" from "null" — HEL does not.
     fn resolve_attr(&self, object: &str, field: &str) -> Option<Value>;
 }
 
-/// Evaluation context that includes resolver and optional built-ins registry
+/// A resolver plus, optionally, a built-ins registry.
 ///
-/// This is the low-level evaluation context used internally. Most users should
-/// use `FactsEvalContext` and the `evaluate()` function instead.
+/// This is what the resolver-based entry points hand to the evaluator. Most callers never
+/// build one directly — [`FactsEvalContext`] and [`evaluate`] cover the common case, and
+/// [`evaluate_with_resolver`] / [`evaluate_with_context`] build this for you. Reach for it
+/// when you want to configure a context once and pass it around.
 ///
 /// # Examples
 ///
@@ -399,24 +472,26 @@ impl<'a> EvalContext<'a> {
     }
 }
 
-/// Error type for HEL evaluation (legacy)
+/// What went wrong during evaluation.
 ///
-/// This error type is used by the low-level evaluation functions.
-/// For higher-level APIs, use `HelError` which provides better error information.
-///
-/// # Variants
-///
-/// - `UnknownAttribute`: Attempted to access a non-existent attribute
-/// - `TypeMismatch`: Operation received wrong type (e.g., comparing string to number)
-/// - `InvalidOperation`: Operation not supported (e.g., calling undefined function)
-/// - `ParseError`: Expression parsing failed
+/// This is the error of the resolver-based entry points ([`evaluate_with_resolver`],
+/// [`evaluate_with_context`], [`evaluate_with_trace`], the `arena` evaluators) and of
+/// the built-in functions. The higher-level entry points wrap it in [`HelError`], which
+/// adds a line and column and a coarse [`ErrorKind`]; they convert via `From`, so `?` and
+/// `.map_err(HelError::from)` work as you would expect.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum EvalError {
-    /// Unknown attribute was accessed
+    /// An attribute was looked up and reported as unknown.
+    ///
+    /// Note that the evaluators built into this crate never produce this: a resolver that
+    /// answers `None` yields [`Value::Null`] instead, which fails the comparison rather
+    /// than aborting evaluation. It exists for resolvers that want to report a genuinely
+    /// invalid attribute path, and can be returned by a built-in.
     UnknownAttribute {
-        /// Object name
+        /// Object half of the attribute path
         object: String,
-        /// Field name
+        /// Field half of the attribute path
         field: String,
     },
     /// Type mismatch in operation
@@ -495,23 +570,26 @@ pub struct HelError {
     pub kind: ErrorKind,
 }
 
-/// Classification of HEL errors
-///
-/// Categorizes errors into different types for easier handling.
+/// A coarse classification of a [`HelError`], for callers that branch on cause without
+/// string-matching the message.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ErrorKind {
-    /// Parse error (syntax error in expression or script)
+    /// The text was not a valid expression or script.
     ParseError,
-    /// Evaluation error (runtime error during expression evaluation)
+    /// Evaluation reached a state it could not proceed from — most often a call to a
+    /// function the context has no registry for.
     EvaluationError,
-    /// Type error (type mismatch or incompatible operation)
+    /// An operand had the wrong type for the operator applied to it.
     TypeError,
-    /// Unknown attribute (attempted to access non-existent field)
+    /// An attribute was reported as unknown; see
+    /// [`EvalError::UnknownAttribute`] for why this is rare.
     UnknownAttribute,
 }
 
 impl HelError {
     /// Create a parse error without location information
+    #[must_use]
     pub fn parse_error(message: String) -> Self {
         Self {
             message,
@@ -522,6 +600,7 @@ impl HelError {
     }
 
     /// Create a parse error with line and column information
+    #[must_use]
     pub fn parse_error_at(message: String, line: usize, column: usize) -> Self {
         Self {
             message,
@@ -532,6 +611,7 @@ impl HelError {
     }
 
     /// Create an evaluation error
+    #[must_use]
     pub fn eval_error(message: String) -> Self {
         Self {
             message,
@@ -542,6 +622,7 @@ impl HelError {
     }
 
     /// Create a type error
+    #[must_use]
     pub fn type_error(message: String) -> Self {
         Self {
             message,
@@ -552,6 +633,7 @@ impl HelError {
     }
 
     /// Create an unknown attribute error
+    #[must_use]
     pub fn unknown_attribute(message: String) -> Self {
         Self {
             message,
@@ -615,6 +697,7 @@ impl From<EvalError> for HelError {
 ///
 /// let ast = parse_rule(r#"binary.format == "elf""#);
 /// ```
+#[must_use]
 pub fn parse_rule(input: &str) -> AstNode {
     let mut pairs = HelParser::parse(Rule::top, input).expect("parse error");
     build_ast(pairs.next().unwrap())
@@ -713,20 +796,19 @@ fn build_ast(pair: Pair<Rule>) -> AstNode {
             let mut inner = pair.into_inner();
             let first = inner.next().expect("Missing function name");
 
-            // Check if second element exists (namespace.function case)
-            let second = inner.next();
-            let (namespace, name, remaining_args) = if second.is_some() {
-                (
+            // A second identifier before the argument list means the call is namespaced
+            // (`ns.func(...)`); the grammar orders it first, so anything left after it is
+            // an argument.
+            let (namespace, name, remaining_args) = match inner.next() {
+                Some(second) => (
                     Some(Arc::from(first.as_str())),
-                    Arc::from(second.unwrap().as_str()),
+                    Arc::from(second.as_str()),
                     inner,
-                )
-            } else {
-                (None, Arc::from(first.as_str()), inner)
+                ),
+                None => (None, Arc::from(first.as_str()), inner),
             };
 
-            // Parse arguments from remaining items
-            let args: Vec<AstNode> = remaining_args.map(|arg| build_ast(arg)).collect();
+            let args: Vec<AstNode> = remaining_args.map(build_ast).collect();
 
             AstNode::FunctionCall {
                 namespace,
@@ -779,9 +861,12 @@ fn parse_comparator(pair: Pair<Rule>) -> Comparator {
 /// # Errors
 ///
 /// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
-/// [`EvalError::UnknownAttribute`] if the resolver returns `None` for an attribute
-/// the expression reads, and [`EvalError::TypeMismatch`] if an operand has the wrong
-/// type for its operator. The top-level expression must evaluate to a boolean.
+/// [`EvalError::InvalidOperation`] if it calls a function — this entry point holds no
+/// registry, so *any* call is an error — and [`EvalError::TypeMismatch`] if an operand
+/// has the wrong type for its operator or the expression as a whole is not a boolean.
+///
+/// An attribute the resolver answers `None` for is not an error: it resolves to
+/// [`Value::Null`], which simply fails whatever comparison it appears in.
 ///
 /// # Examples
 ///
@@ -823,11 +908,13 @@ pub fn evaluate_with_resolver(
 /// # Errors
 ///
 /// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
-/// [`EvalError::UnknownAttribute`] if the resolver returns `None` for an attribute
-/// the expression reads, [`EvalError::InvalidOperation`] if the expression calls a
-/// function that `builtins` does not define or passes it arguments it rejects, and
-/// [`EvalError::TypeMismatch`] if an operand has the wrong type for its operator.
-/// The top-level expression must evaluate to a boolean.
+/// [`EvalError::InvalidOperation`] if the expression calls a function `builtins` does not
+/// define or passes one arguments it rejects, and [`EvalError::TypeMismatch`] if an
+/// operand has the wrong type for its operator or the expression as a whole is not a
+/// boolean.
+///
+/// An attribute the resolver answers `None` for is not an error: it resolves to
+/// [`Value::Null`], which simply fails whatever comparison it appears in.
 ///
 /// # Examples
 ///
@@ -882,7 +969,9 @@ fn evaluate_ast_with_context(ast: &AstNode, ctx: &EvalContext) -> Result<bool, E
         AstNode::Comparison { left, op, right } => {
             evaluate_comparison_with_context(left, *op, right, ctx)
         }
-        // Handle identifiers and other nodes that might evaluate to boolean
+        // Any other node is a value rather than a condition, so it is only usable as a
+        // condition when that value is itself a boolean — otherwise the expression is a
+        // type error rather than a silent false.
         other => {
             let value = eval_node_to_value_with_context(other, ctx)?;
             match value {
@@ -918,11 +1007,11 @@ pub(crate) fn eval_node_to_value_with_context(
         AstNode::Number(n) => Ok(Value::Number(*n as f64)),
         AstNode::Float(f) => Ok(Value::Number(*f)),
         AstNode::Identifier(s) => {
-            // First check if this is a variable binding
+            // A binding from a script's `let` shadows the bare word; an unbound identifier
+            // reads as its own name, which is how unquoted words are written in a condition.
             if let Some(value) = ctx.get_variable(s) {
                 Ok(value.clone())
             } else {
-                // Otherwise treat it as a string literal
                 Ok(Value::String(s.clone()))
             }
         }
@@ -945,9 +1034,9 @@ pub(crate) fn eval_node_to_value_with_context(
             }
             Ok(Value::Map(map))
         }
-        // Handle boolean expressions (Comparison, And, Or)
+        // A condition nested as an operand is re-wrapped as a Value so that, say,
+        // `(a == 1) == true` has something to compare against.
         AstNode::Comparison { .. } | AstNode::And(_) | AstNode::Or(_) => {
-            // Evaluate as boolean and wrap in Value::Bool
             let bool_result = evaluate_ast_with_context(node, ctx)?;
             Ok(Value::Bool(bool_result))
         }
@@ -956,14 +1045,12 @@ pub(crate) fn eval_node_to_value_with_context(
             name,
             args,
         } => {
-            // Evaluate arguments
             let arg_values: Result<Vec<Value>, EvalError> = args
                 .iter()
                 .map(|arg| eval_node_to_value_with_context(arg, ctx))
                 .collect();
             let arg_values = arg_values?;
 
-            // Call built-in function if registry is available
             if let Some(builtins) = ctx.builtins {
                 let ns = namespace.as_ref().map(|s| s.as_ref()).unwrap_or("core");
                 builtins.call(ns, name, &arg_values)
@@ -1037,7 +1124,7 @@ fn parse_number(val: &str) -> Option<u64> {
 }
 
 // ============================================================================
-// New Public APIs for Expression Validation and Evaluation
+// Expression Validation, Parsing
 // ============================================================================
 
 /// Represents a parsed HEL expression
@@ -1045,7 +1132,14 @@ pub type Expression = AstNode;
 
 /// Validates HEL expression syntax without evaluation
 ///
-/// Returns `Ok(())` if syntax is valid, `Err` with detailed parse error if invalid.
+/// The whole of `expr` must be one expression: trailing characters are a parse error, not
+/// something ignored. Use this to reject malformed rules before they are ever evaluated.
+///
+/// # Errors
+///
+/// Returns [`HelError`] carrying a line and column if `expr` is not a valid HEL
+/// expression, whether the failure is bad syntax, an unterminated literal, or valid
+/// syntax followed by extra input.
 ///
 /// # Examples
 ///
@@ -1055,10 +1149,9 @@ pub type Expression = AstNode;
 /// let expr = r#"binary.arch == "x86_64" AND security.nx == false"#;
 /// assert!(validate_expression(expr).is_ok());
 ///
-/// // Use genuinely invalid syntax (not just a string literal),
-/// // so the parser must return an error.
-/// let bad_expr = "(";
-/// assert!(validate_expression(bad_expr).is_err());
+/// // Trailing input is rejected rather than silently dropped.
+/// assert!(validate_expression(r#"binary.arch == "x86_64" oops"#).is_err());
+/// assert!(validate_expression("(").is_err());
 /// ```
 pub fn validate_expression(expr: &str) -> Result<(), HelError> {
     match HelParser::parse(Rule::top, expr) {
@@ -1078,9 +1171,21 @@ pub fn validate_expression(expr: &str) -> Result<(), HelError> {
     }
 }
 
-/// Parse a HEL expression into an AST (for advanced use cases)
+/// Parse a HEL expression into an AST
 ///
-/// Returns the parsed AST if successful, or a detailed parse error.
+/// Equivalent to [`validate_expression`] followed by [`parse_rule`], but the failure is a
+/// `Result` rather than a panic.
+///
+/// The AST is for *inspection*: walking a rule, rewriting it, printing it, or checking what
+/// it refers to. It does not make evaluation cheaper — every evaluator in this crate takes
+/// expression text and parses it, so holding an `Expression` saves you nothing on the
+/// evaluation path. For repeated evaluation the lever is
+/// `hel::arena::ArenaParser`, which reuses the memory the AST is built in.
+///
+/// # Errors
+///
+/// Returns [`HelError`] with line and column information if `expr` is not a valid HEL
+/// expression. Because this validates before parsing, the returned error is never a panic.
 ///
 /// # Examples
 ///
@@ -1089,43 +1194,53 @@ pub fn validate_expression(expr: &str) -> Result<(), HelError> {
 ///
 /// let expr = r#"binary.format == "elf""#;
 /// let ast = parse_expression(expr).expect("parse failed");
+///
+/// assert!(parse_expression("binary.format ==").is_err());
 /// ```
 pub fn parse_expression(expr: &str) -> Result<Expression, HelError> {
     validate_expression(expr)?;
     Ok(parse_rule(expr))
 }
 
-/// Evaluation context with facts/data for expression evaluation
+/// The simplest [`HelResolver`]: a map of facts you fill in yourself.
 ///
-/// Provides a simple key-value store for facts that can be referenced
-/// in HEL expressions.
+/// # Key format
+///
+/// Keys are `"object.field"`, exactly as written in an expression. HEL's grammar only lets
+/// you reference an attribute through `object.field`, so a key without a dot — `"arch"`
+/// rather than `"binary.arch"` — can never be looked up. The lookup is an exact string
+/// match: `"binary.arch"` and `"Binary.arch"` are different facts.
 ///
 /// # Examples
 ///
 /// ```
-/// use hel::{FactsEvalContext, Value};
+/// use hel::{evaluate, FactsEvalContext, Value};
 ///
 /// let mut ctx = FactsEvalContext::new();
 /// ctx.add_fact("binary.arch", Value::String("x86_64".into()));
 /// ctx.add_fact("security.nx", Value::Bool(false));
+///
+/// assert!(evaluate(r#"binary.arch == "x86_64""#, &ctx).expect("evaluated"));
 /// ```
 pub struct FactsEvalContext {
     facts: BTreeMap<String, Value>,
 }
 
 impl FactsEvalContext {
-    /// Create a new empty evaluation context
+    /// Create a context with no facts in it.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             facts: BTreeMap::new(),
         }
     }
 
-    /// Add a fact to the context
+    /// Set the fact at `key`, replacing any previous value.
+    ///
+    /// See the [type-level docs](FactsEvalContext#key-format) for the key format.
     pub fn add_fact(&mut self, key: &str, value: Value) {
         self.facts.insert(key.to_string(), value);
     }
-
 }
 
 impl Default for FactsEvalContext {
@@ -1143,7 +1258,16 @@ impl HelResolver for FactsEvalContext {
 
 /// Evaluate expression against context
 ///
-/// Evaluates a HEL expression using the provided facts context.
+/// The simplest entry point: parse `expr`, resolve its attributes from the facts in
+/// `context`, and return the resulting boolean.
+///
+/// # Errors
+///
+/// Returns [`HelError`] if `expr` is not a valid HEL expression, if an operand has the
+/// wrong type for its operator, or if it calls a function — this path has no built-ins, so
+/// use [`evaluate_with_context`] for expressions that call them.
+///
+/// A fact that is not in `context` is not an error: it reads as [`Value::Null`].
 ///
 /// # Examples
 ///
@@ -1179,11 +1303,24 @@ pub struct Script {
 
 /// Parse and validate a .hel script file (may contain multiple expressions, let bindings)
 ///
-/// Scripts support let bindings for reusable sub-expressions and a final boolean expression.
+/// A script is a sequence of `let <name> = <expression>` bindings followed by a final
+/// boolean expression. Each binding is evaluated in order and may refer to the ones before
+/// it. Blank lines and lines starting with `#` are ignored.
 ///
-/// **Implementation Note**: The current parser uses heuristics to determine expression boundaries,
-/// which works for most cases but may have edge cases with complex multi-line expressions.
-/// Future improvements could include a more robust state machine-based parser.
+/// # Errors
+///
+/// Returns [`HelError`] if a binding's expression or the final expression is not valid HEL
+/// syntax, if the script has no final expression, or if a line is neither a binding nor a
+/// continuation and cannot be interpreted as one of those.
+///
+/// # Note
+///
+/// The parser is line-oriented, and a `let` binding absorbs the following lines only while
+/// the next line begins with a joining operator (`AND`, `OR`, `&&`, `||`) or the text
+/// collected so far is not yet a complete expression. So a binding keeps its continuation
+/// only if the break is unambiguous — either the next line starts with an operator, or the
+/// line before it ended mid-expression. Anything after the final expression is joined onto
+/// it and therefore has to be a continuation of it.
 ///
 /// # Examples
 ///
@@ -1206,46 +1343,40 @@ pub fn parse_script(script: &str) -> Result<Script, HelError> {
     while i < lines.len() {
         let line = lines[i].trim();
 
-        // Skip empty lines and comments
         if line.is_empty() || line.starts_with('#') {
             i += 1;
             continue;
         }
 
-        // Check for let binding
-        if line.starts_with("let ") {
-            // Parse: let name = expression
-            let rest = line.strip_prefix("let ").unwrap().trim();
+        if let Some(rest) = line.strip_prefix("let ") {
+            let rest = rest.trim();
 
             if let Some(eq_pos) = rest.find('=') {
                 let name = rest[..eq_pos].trim();
                 let expr_after_eq = rest[eq_pos + 1..].trim();
                 let mut expr_str = String::new();
 
-                // Start expression string if there's content after '='
                 if !expr_after_eq.is_empty() {
                     expr_str = expr_after_eq.to_string();
                 }
 
-                // Handle multi-line let expressions
-                // Continue collecting lines until we hit another "let" or a potential final expression
+                // A binding swallows following lines only while the break is unambiguous:
+                // the next line starts with a joining operator, or what we hold so far is
+                // not yet a complete expression. Otherwise this line is the final
+                // expression and the binding ends here.
                 i += 1;
                 while i < lines.len() {
                     let next_line = lines[i].trim();
 
-                    // Skip empty lines and comments
                     if next_line.is_empty() || next_line.starts_with('#') {
                         i += 1;
                         continue;
                     }
 
-                    // If we hit another "let", stop collecting
                     if next_line.starts_with("let ") {
                         break;
                     }
 
-                    // If this line looks like it could be a standalone final expression
-                    // (doesn't start with an operator), check if we have collected enough
                     if !expr_str.is_empty()
                         && !next_line.starts_with("AND")
                         && !next_line.starts_with("OR")
@@ -1253,15 +1384,11 @@ pub fn parse_script(script: &str) -> Result<Script, HelError> {
                         && !next_line.starts_with("or")
                         && !next_line.starts_with("&&")
                         && !next_line.starts_with("||")
+                        && parse_expression(&expr_str).is_ok()
                     {
-                        // Try to parse what we have so far
-                        if parse_expression(&expr_str).is_ok() {
-                            // We have a complete expression, stop here
-                            break;
-                        }
+                        break;
                     }
 
-                    // Add this line to the expression
                     if !expr_str.is_empty() {
                         expr_str.push(' ');
                     }
@@ -1275,11 +1402,11 @@ pub fn parse_script(script: &str) -> Result<Script, HelError> {
             }
         }
 
-        // This is the final expression
         if final_expr.is_none() {
             let mut expr_str = line.to_string();
 
-            // Collect remaining lines as part of final expression
+            // Everything left belongs to the final expression; the loop below cannot run
+            // twice because we break out of the outer loop once it is set.
             i += 1;
             while i < lines.len() {
                 let next_line = lines[i].trim();
@@ -1311,7 +1438,17 @@ pub fn parse_script(script: &str) -> Result<Script, HelError> {
 
 /// Evaluate a script and return the final boolean result
 ///
-/// Evaluates all let bindings in order, then evaluates the final expression.
+/// Evaluates each `let` binding in declaration order, then evaluates the final expression.
+/// A binding sees the facts in `context` and the bindings declared before it.
+///
+/// # Errors
+///
+/// Returns [`HelError`] if the script does not parse (see [`parse_script`]), or if
+/// evaluation fails: an operand has the wrong type for its operator, or the script calls a
+/// function — this path has no built-ins, so use [`evaluate_with_context`] with a
+/// [`BuiltinsRegistry`] when a script needs them.
+///
+/// A fact absent from `context` is not an error: it reads as [`Value::Null`].
 ///
 /// # Examples
 ///
@@ -1336,24 +1473,19 @@ pub fn parse_script(script: &str) -> Result<Script, HelError> {
 pub fn evaluate_script(script: &str, context: &FactsEvalContext) -> Result<bool, HelError> {
     let parsed = parse_script(script)?;
 
-    // Start with base context
+    // Bindings are threaded through in declaration order, each one seeing those before it,
+    // which is what `parse_script`'s ordering guarantee is for.
     let mut eval_ctx = EvalContext::new(context);
-
-    // Evaluate and store let bindings
     for (name, expr) in &parsed.bindings {
-        let value =
-            eval_node_to_value_with_context(expr, &eval_ctx).map_err(|e| HelError::from(e))?;
-
-        // Add variable to context
+        let value = eval_node_to_value_with_context(expr, &eval_ctx).map_err(HelError::from)?;
         eval_ctx = eval_ctx.with_variable(name.clone(), value);
     }
 
-    // Evaluate final expression
     evaluate_ast_with_context(&parsed.final_expr, &eval_ctx).map_err(|e| e.into())
 }
 
 // ============================================================================
-// Helper implementations
+// Convenience conversions into `Value`
 // ============================================================================
 
 impl From<&str> for Value {
@@ -1382,10 +1514,12 @@ impl From<f64> for Value {
 
 impl From<i32> for Value {
     fn from(n: i32) -> Self {
-        Value::Number(n as f64)
+        Value::Number(f64::from(n))
     }
 }
 
+/// Widening an integer to `f64` is lossy above 2^53, which is the precision limit of the
+/// mantissa. Facts and literals beyond that are not represented exactly.
 impl From<u64> for Value {
     fn from(n: u64) -> Self {
         Value::Number(n as f64)
@@ -1396,34 +1530,8 @@ impl From<u64> for Value {
 mod tests {
     use super::*;
 
-    // Basic resolver used in trace tests and other unit tests
-    struct TestResolver;
-
-    impl HelResolver for TestResolver {
-        fn resolve_attr(&self, object: &str, field: &str) -> Option<Value> {
-            match (object, field) {
-                ("binary", "format") => Some(Value::String("elf".into())),
-                ("security", "nx_enabled") => Some(Value::Bool(true)),
-                _ => None,
-            }
-        }
-    }
-
-    #[test]
-    fn test_evaluate_with_trace_simple() {
-        let resolver = TestResolver;
-        let condition = r#"binary.format == "elf""#;
-
-        let trace = evaluate_with_trace(condition, &resolver, None).expect("evaluation failed");
-
-        assert!(trace.result, "Condition should evaluate to true");
-        assert_eq!(trace.atoms.len(), 1, "Should have one atom");
-        assert_eq!(trace.atoms[0].left, "binary.format");
-        assert_eq!(trace.atoms[0].right, "\"elf\"");
-        assert_eq!(trace.atoms[0].resolved_left_value, Some("elf".to_string()));
-        assert_eq!(trace.atoms[0].resolved_right_value, Some("elf".to_string()));
-        assert!(trace.atoms[0].atom_result);
-    }
+    // `evaluate_with_trace` itself is covered by the unit tests in `crate::trace`; these
+    // tests cover the parts of the public surface that live in this module.
 
     #[test]
     fn test_resolver_number_and_list_behavior() {

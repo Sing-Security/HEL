@@ -1,13 +1,12 @@
 # HEL — Heuristic Expression Language
 
-Status: OPEN — Apache-2.0  
 SPDX-License-Identifier: Apache-2.0
 
 ## Overview
 
-- HEL (Heuristic Expression Language) is a small, deterministic, auditable expression language and reference implementation.
-- This crate implements the open core: a pest-based parser, a compact typed AST, deterministic evaluator(s), a pluggable builtins registry, schema/package loaders for domain types, and a trace facility that produces stable, auditable evaluation traces.
-- The crate is intentionally product-agnostic: domain-specific or proprietary built-ins and rule packs should be implemented and shipped separately and injected at runtime via the builtins provider interface.
+- HEL (Heuristic Expression Language) is a small, deterministic, auditable expression language and its reference implementation.
+- This crate provides a pest-based parser, a compact typed AST, deterministic evaluators, a pluggable built-ins registry, schema and package loaders for domain types, and a trace facility that produces stable, auditable evaluation traces.
+- The crate is deliberately domain-agnostic. Registers, rule packs and built-ins that know about a particular kind of data belong in separate crates, injected at runtime through the built-ins provider interface.
 
 ## Quick Start
 
@@ -20,7 +19,7 @@ use hel::validate_expression;
 
 // Validate syntax without evaluation
 let expr = r#"binary.arch == "x86_64" AND security.nx == false"#;
-validate_expression(expr)?;  // Returns Ok(()) or detailed parse error
+assert!(validate_expression(expr).is_ok());  // Err carries a line and column
 ```
 
 ### Expression Evaluation with Facts
@@ -35,7 +34,8 @@ ctx.add_fact("security.nx", Value::Bool(false));
 
 // Evaluate expression
 let expr = r#"binary.arch == "x86_64" AND security.nx == false"#;
-let result = evaluate(expr, &ctx)?;  // Returns true
+let result = evaluate(expr, &ctx).expect("evaluation failed");  // true
+assert!(result);
 ```
 
 ### Script Files with Let Bindings
@@ -53,18 +53,17 @@ ctx.add_fact("manifest.permissions", Value::List(vec![
 ctx.add_fact("binary.entropy", Value::Number(8.0));
 
 let script = r#"
-    # Define reusable sub-expressions
     let has_sms_perms = 
       manifest.permissions CONTAINS "READ_SMS" AND
       manifest.permissions CONTAINS "SEND_SMS"
     
     let has_obfuscation = binary.entropy > 7.5
     
-    # Final boolean expression
     has_sms_perms AND has_obfuscation
 "#;
 
-let result = evaluate_script(script, &ctx)?;  // Returns true
+let result = evaluate_script(script, &ctx).expect("evaluation failed");  // true
+assert!(result);
 ```
 
 ### Arena Allocation for High Performance
@@ -83,7 +82,8 @@ ctx.add_fact("security.nx", Value::Bool(false));
 let parser = ArenaParser::new();
 
 let expr = r#"binary.arch == "x86_64" AND security.nx == false"#;
-let result = evaluate_arena(expr, &ctx, &parser)?;  // Returns true
+let result = evaluate_arena(expr, &ctx, &parser).expect("evaluation failed");  // true
+assert!(result);
 ```
 
 **When to use arena allocation:**
@@ -100,17 +100,23 @@ let result = evaluate_arena(expr, &ctx, &parser)?;  // Returns true
 
 ```rust
 use hel::arena::{ArenaParser, evaluate_arena};
+use hel::{FactsEvalContext, Value};
+
+let mut ctx = FactsEvalContext::new();
+ctx.add_fact("data.x", Value::Number(42.0));
 
 let mut parser = ArenaParser::new();
 
 // Evaluate first expression
-let result1 = evaluate_arena(expr1, &ctx, &parser)?;
+let result1 = evaluate_arena(r#"data.x == 42"#, &ctx, &parser).expect("eval failed");
+assert!(result1);
 
 // Reset arena to reuse memory
 parser.reset();
 
 // Evaluate second expression (reuses arena memory)
-let result2 = evaluate_arena(expr2, &ctx, &parser)?;
+let result2 = evaluate_arena(r#"data.x > 0"#, &ctx, &parser).expect("eval failed");
+assert!(result2);
 ```
 
 ## Goals
@@ -142,8 +148,8 @@ let result2 = evaluate_arena(expr2, &ctx, &parser)?;
 - **EvalError**: Evaluation-time errors (type mismatches, unknown attributes, etc.)
 - Clear error messages for common mistakes
 
-### Legacy APIs
-- **Low-level Parsing**: `parse_rule(condition: &str) -> AstNode` - direct AST construction
+### Low-level APIs
+- **Direct Parsing**: `parse_rule(condition: &str) -> AstNode` - parse straight to an AST, panicking on bad input
 - **AST**: `AstNode` variants: `Bool`, `String`, `Number`, `Float`, `Identifier`, `Attribute`, `Comparison`, `And`, `Or`, `ListLiteral`, `MapLiteral`, `FunctionCall`
 - **Comparators**: `==`, `!=`, `>`, `>=`, `<`, `<=`, `CONTAINS`, `IN`
 
@@ -241,43 +247,68 @@ has_sms_perms AND has_obfuscation
 
 ### Best Practices for Integration
 
-1. **Validation Before Deployment**: Always validate rule scripts before loading them:
+1. **Validation Before Deployment**: Always validate rule scripts before loading them.
+   A script is not a single expression — it has `let` bindings — so use `parse_script`,
+   not `validate_expression`, to check one:
+
    ```rust
-   let script = fs::read_to_string("rule.hel")?;
-   validate_expression(&script)?;  // Catch syntax errors early
+   use std::fs;
+
+   fn load_rule(path: &str) -> Result<hel::Script, Box<dyn std::error::Error>> {
+       let script = fs::read_to_string(path)?;
+       Ok(hel::parse_script(&script)?)  // Catch syntax errors before deployment
+   }
    ```
 
 2. **Error Handling**: Distinguish between parse errors (rule bugs) and evaluation errors (data issues):
+
    ```rust
-   match evaluate_script(&script, &ctx) {
-       Ok(result) => { /* process result */ }
-       Err(e) if matches!(e.kind, ErrorKind::ParseError) => {
-           eprintln!("Rule has syntax error: {}", e);
-       }
-       Err(e) => {
-           eprintln!("Evaluation error: {}", e);
+   use hel::{evaluate_script, ErrorKind, FactsEvalContext};
+
+   fn check(script: &str, ctx: &FactsEvalContext) {
+       match evaluate_script(script, ctx) {
+           Ok(result) => { /* process result */ }
+           Err(e) if matches!(e.kind, ErrorKind::ParseError) => {
+               eprintln!("Rule has syntax error: {}", e);
+           }
+           Err(e) => {
+               eprintln!("Evaluation error: {}", e);
+           }
        }
    }
    ```
 
-3. **Performance**: Parse scripts once and reuse the AST:
+3. **Validation at load time**: parse each rule once when it is loaded, so a syntax error
+   surfaces at startup rather than on the first evaluation:
+
    ```rust
-   let parsed = parse_script(&script)?;
-   // Store parsed.bindings and parsed.final_expr
-   // Reuse for multiple evaluations
+   use hel::{parse_script, Script};
+
+   fn load_rules(sources: &[String]) -> Result<Vec<Script>, hel::HelError> {
+       sources.iter().map(|s| parse_script(s)).collect()
+   }
    ```
 
+   Note that evaluation takes the script text, not a `Script` — `evaluate_script` and
+   `evaluate` re-parse on each call. Parsing up front is still worth doing to fail fast;
+   it does not by itself make repeated evaluation cheaper. For a tight loop, the arena
+   allocator (`hel::arena::ArenaParser`, reused and reset between calls) is the lever the
+   crate currently offers.
+
 ## Advanced Usage Examples
+
 - Parse an expression into an AST:
-```/dev/null/example_parse.rs#L1-20
+
+```rust
 use hel::parse_rule;
 
-let ast = parse_rule("binary.format == \"elf\" AND security.nx_enabled == true");
+let ast = parse_rule(r#"binary.format == "elf" AND security.nx_enabled == true"#);
 // `ast` is an `AstNode` representing the parsed expression
 ```
 
 - Evaluate with a simple resolver:
-```/dev/null/example_eval.rs#L1-40
+
+```rust
 use hel::{evaluate_with_resolver, HelResolver, Value};
 
 struct MyResolver;
@@ -292,56 +323,70 @@ impl HelResolver for MyResolver {
 }
 
 let resolver = MyResolver;
-let result = evaluate_with_resolver(r#"binary.format == "elf""#, &resolver)?;
+let result = evaluate_with_resolver(r#"binary.format == "elf""#, &resolver)
+    .expect("evaluation failed");
 assert!(result);
 ```
 
 - Evaluate with builtins and capture a trace:
-```/dev/null/example_trace.rs#L1-60
-use hel::{evaluate_with_trace, HelResolver, builtins::BuiltinsRegistry, builtins::CoreBuiltinsProvider};
 
-let mut registry = BuiltinsRegistry::new();
-registry.register(&CoreBuiltinsProvider)?;
+```rust
+use hel::builtins::{BuiltinsRegistry, CoreBuiltinsProvider};
+use hel::{evaluate_with_trace, HelResolver, Value};
 
 struct MyResolver;
 impl HelResolver for MyResolver {
-    fn resolve_attr(&self, object: &str, field: &str) -> Option<hel::Value> { /* ... */ unimplemented!() }
+    fn resolve_attr(&self, _: &str, _: &str) -> Option<Value> { None }
 }
 
-let trace = evaluate_with_trace("core.len([1,2,3]) == 3", &MyResolver, Some(&registry))?;
+let mut registry = BuiltinsRegistry::new();
+registry.register(&CoreBuiltinsProvider).expect("registration failed");
+
+let trace = evaluate_with_trace("core.len([1,2,3]) == 3", &MyResolver, Some(&registry))
+    .expect("trace failed");
+assert!(trace.result);
 println!("{}", trace.pretty_print()); // deterministic, human-friendly audit trail
 ```
 
-Design notes and important details
-- Determinism
-  - Internal maps use `BTreeMap` and lists are iterated stably to ensure deterministic behavior across runs.
-  - Traces and `facts_used()` are sorted to make audit logs stable.
-- Pure builtins
-  - Builtins must be pure and deterministic; they must not perform unbounded I/O or rely on global mutable state. The registry enforces namespace isolation and stable ordering.
-- Error handling
-  - Public evaluation functions return `Result<..., EvalError>`. `EvalError` covers parse errors, type mismatches, unknown attributes, and invalid operations.
-- Limits & omissions
-  - The core language focuses on declarative expressions and comparisons. It does not provide arithmetic operators (`+`, `-`, `*`, `/`) beyond numeric comparisons in the current implementation.
-  - Function calls require a `BuiltinsRegistry` in the evaluation context. Without it, invoking `FunctionCall` yields an `InvalidOperation` error.
-  - The crate exposes primitives (parser, AST, evaluator, trace, schema loader) and intentionally does not provide a single monolithic "compiler" or product-specific rule engine.
-- Performance & safety
-  - The evaluator uses `f64` for runtime numbers; integer literal parsing persists `u64` in the AST then converts as needed to `Value::Number(f64)`.
-  - Avoid unbounded regexes in any custom builtins. The crate itself does not depend on a regex engine; pattern-match builtins must ensure bounded, deterministic execution.
+## Requirements
 
-Documentation and where to look next
-- Read the `src` modules to get API-level details:
-  - `hel::schema` — package manifest, `SchemaPackage`, schema parsing helpers.
-  - `hel::builtins` — provider/registry API and `CoreBuiltinsProvider`.
-  - `hel::trace` — trace capture and pretty-print helpers.
-  - `hel::parse_rule` and the AST in `src/lib.rs`.
-- Tests in `src/*` demonstrate intended semantics and edge-case behavior (NaN handling, builtins, trace order, package registry collision detection).
+- Rust 1.85 or newer (the floor comes from the `toml` dependency tree, not from the language
+  features used here).
+- No Cargo features are required. `arena` is on by default; `default-features = false` drops
+  the arena module and the `bumpalo` dependency with it.
 
-Contributing
-- Follow these principles when contributing:
-  - Preserve determinism and auditability.
-  - Keep open built-ins generic and product-agnostic.
-  - When adding features that affect evaluation semantics, add deterministic tests and trace-based examples.
-  - Avoid exposing `unsafe` in public APIs unless strictly necessary and justified with clear documentation.
+## Design notes
 
-License
-- Apache-2.0. Open builtins included here must follow the same license. Product-specific or proprietary builtins and rule packs belong in separate crates and should be injected through `BuiltinsProvider`.
+- **Determinism**
+  - Internal maps use `BTreeMap` and lists are iterated stably, so results do not vary between runs.
+  - Traces and `facts_used()` are sorted, so audit logs are stable.
+- **Pure built-ins**
+  - Built-ins must be pure and deterministic; they must not perform unbounded I/O or rely on global mutable state. The registry enforces namespace isolation and stable ordering.
+- **Error handling**
+  - The low-level resolver-based evaluators return `Result<_, EvalError>`; the high-level entry points (`evaluate`, `evaluate_script`, `evaluate_arena`) return `Result<_, HelError>`. `EvalError` covers parse errors, type mismatches, unknown attributes and invalid operations; `HelError` adds line and column information and a coarse `ErrorKind`.
+- **Limits**
+  - The language is declarative: comparisons, `AND`/`OR`, literals, attribute access and function calls. There is no arithmetic (`+`, `-`, `*`, `/`), no negation, and no control flow.
+  - Function calls require a `BuiltinsRegistry` in the evaluation context. Without one they fail with an `InvalidOperation` error rather than silently evaluating to false.
+  - The crate exposes primitives — parser, AST, evaluators, trace, schema loader — and deliberately does not provide a monolithic compiler or a rule engine for any particular domain.
+- **Numbers**
+  - Runtime numbers are `f64`. Integer literals are stored as `u64` in the AST and converted on use, so integers above 2^53 lose precision.
+  - There is no regex engine here. If a custom built-in pattern-matches, it is responsible for keeping that bounded and deterministic.
+
+## Documentation and where to look next
+
+- `hel::schema` — package manifests, `SchemaPackage`, schema parsing helpers.
+- `hel::builtins` — provider/registry API and `CoreBuiltinsProvider`.
+- `hel::trace` — trace capture and pretty-print helpers.
+- `src/lib.rs` — the parser entry points and the AST.
+- The tests in `src/*` are the specification for edge-case behaviour: NaN handling, built-in dispatch, trace ordering, package collision detection.
+
+## Contributing
+
+- Preserve determinism and auditability.
+- Keep the built-ins shipped here generic and domain-agnostic.
+- When a change affects evaluation semantics, add a deterministic test for it.
+- Avoid `unsafe` in public APIs unless it is strictly necessary and documented.
+
+## License
+
+Apache-2.0. Built-ins shipped with this crate are under the same licence; built-ins that belong to a particular domain or product belong in separate crates and should be injected through `BuiltinsProvider`.

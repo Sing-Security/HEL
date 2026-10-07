@@ -1,3 +1,12 @@
+//! Criterion benchmarks comparing the heap-allocated and arena evaluators.
+//!
+//! Run with `cargo bench`. The arena cases are compiled out when the `arena` feature is
+//! disabled, which is what the `#[cfg(feature = "arena")]` gates below select on.
+//!
+//! `missing_docs` is allowed because `criterion_group!` generates the benchmark entry
+//! point and a macro-generated item cannot carry a doc comment.
+#![allow(missing_docs)]
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use hel::{FactsEvalContext, Value};
 

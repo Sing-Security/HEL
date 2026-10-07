@@ -11,6 +11,10 @@ documentation = "https://docs.rs/hel"
 authors = ["Joshua Fath <joshuaf@lfam.us>"]
 keywords = ["expression-language", "dsl", "ast", "pest", "interpreter"]
 categories = ["compilers", "parsing", "development-tools"]
+# Driven by the dependency tree, not by the language features used here: `toml` -> `toml_edit`
+# -> `indexmap`/`hashbrown` are what pin this. Declared so an older toolchain fails with a
+# clear message instead of a confusing type error.
+rust-version = "1.85"
 publish = true
 
 # Ship source, README, licence and the manifest — nothing else. `hel-template/`

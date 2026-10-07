@@ -24,6 +24,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Parse benchmarks for both approaches
   - Evaluation benchmarks for both approaches
   - Batch evaluation benchmarks simulating rule engine workloads
+- `rust-version = "1.85"` is now declared.
+
+### Changed
+
+- **Breaking — the public enums are `#[non_exhaustive]`**: `AstNode`, `Comparator`, `Value`,
+  `EvalError`, `ErrorKind`, `FieldType` and `PackageError` now need a wildcard arm when
+  matched from another crate. Adding a variant to any of them is no longer a breaking change.
+- **`core.contains` uses the language's `==`**: list membership is decided by the same
+  comparison the `CONTAINS` operator uses, rather than by a second, separately written
+  equality. The two spellings of "is this element in this list" can no longer disagree. As a
+  consequence a *list* element is no longer matched recursively — `core.contains([[1, 2]],
+  [1, 2])` is now `false`, matching `[[1, 2]] CONTAINS [1, 2]`.
+
+### Fixed
+
+- **The grammar is anchored**: `validate_expression`, `parse_expression` and `parse_script`
+  now reject trailing input. pest matches a *prefix*, so an unanchored grammar accepted
+  `binary.arch == "elf" garbage` as the valid prefix and silently ignored the rest — syntax
+  validation did not actually validate. Rules that previously "validated" while containing
+  trailing junk will now correctly fail to parse.
+- **The resolver-based evaluators no longer panic**: `evaluate_with_resolver`,
+  `evaluate_with_context`, `evaluate_with_trace`, `evaluate_with_resolver_arena` and
+  `evaluate_with_context_arena` returned `Result` but reached the parser through the
+  panicking `parse_rule`, so malformed input unwound the caller. They now return
+  `EvalError::ParseError`, which is what their `# Errors` sections already promised. Only
+  input that previously panicked behaves differently. `parse_rule` itself still panics, by
+  contract, and says so under `# Panics`.
+- **Documentation**: the resolver-based evaluators' `# Errors` sections claimed a missing
+  attribute produced `EvalError::UnknownAttribute`; it resolves to `Value::Null` instead, and
+  the docs now say so.
+
+### Removed
+
+- `FactsEvalContext::from_json` — unused, and the JSON shape it accepted was never specified.
 
 ### Dependencies
 

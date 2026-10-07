@@ -42,11 +42,21 @@ pub struct PackageManifest {
 
 impl PackageManifest {
 	/// Parse manifest from TOML string
+	///
+	/// # Errors
+	///
+	/// Returns [`PackageError::ManifestParse`] if `content` is not valid TOML for a
+	/// manifest, or if a required key (`name`, `version` or `schemas`) is absent.
 	pub fn from_toml(content: &str) -> Result<Self, PackageError> {
 		toml::from_str(content).map_err(|e| PackageError::ManifestParse(e.to_string()))
 	}
 
 	/// Load manifest from file
+	///
+	/// # Errors
+	///
+	/// Returns [`PackageError::Io`] if `path` cannot be read, or the same errors as
+	/// [`PackageManifest::from_toml`] if its contents are not a valid manifest.
 	pub fn from_file(path: &Path) -> Result<Self, PackageError> {
 		let content = std::fs::read_to_string(path).map_err(|e| {
 			PackageError::Io(format!("Failed to read manifest at {}: {}", path.display(), e))
@@ -74,6 +84,16 @@ pub struct SchemaPackage {
 
 impl SchemaPackage {
 	/// Load a package from a directory containing hel-package.toml
+	///
+	/// Reads every schema file the manifest lists, in manifest order, and merges their
+	/// types into one [`Schema`].
+	///
+	/// # Errors
+	///
+	/// Returns [`PackageError::Io`] if the manifest or any listed schema file cannot be
+	/// read, [`PackageError::ManifestParse`] if the manifest is malformed,
+	/// [`PackageError::SchemaParse`] if a schema file does not parse, and
+	/// [`PackageError::DuplicateType`] if two schema files declare the same type name.
 	pub fn from_directory(dir: &Path) -> Result<Self, PackageError> {
 		let manifest_path = dir.join("hel-package.toml");
 		let manifest = PackageManifest::from_file(&manifest_path)?;
@@ -81,18 +101,17 @@ impl SchemaPackage {
 		let mut combined_schema = Schema::new();
 		let mut all_imports = Vec::new();
 
-		// Load schema files
 		for schema_file in &manifest.schemas {
 			let schema_path = dir.join(schema_file);
 			let content = std::fs::read_to_string(&schema_path).map_err(|e| {
 				PackageError::Io(format!("Failed to read schema {}: {}", schema_path.display(), e))
 			})?;
 
-			// Parse imports from schema content (simple line-based for now)
+			// Imports are collected from the raw text because `parse_schema` keeps only the
+			// types; dependencies are resolved by the registry, not by the schema itself.
 			let imports = extract_imports(&content);
 			all_imports.extend(imports);
 
-			// Parse schema
 			let parsed = parse_schema(&content).map_err(|e| {
 				PackageError::SchemaParse {
 					package: manifest.name.clone(),
@@ -101,7 +120,6 @@ impl SchemaPackage {
 				}
 			})?;
 
-			// Merge types into combined schema
 			for (name, typedef) in parsed.types {
 				if combined_schema.types.contains_key(&name) {
 					return Err(PackageError::DuplicateType {
@@ -122,11 +140,13 @@ impl SchemaPackage {
 	}
 
 	/// Get the namespace for this package (package name by default)
+	#[must_use]
 	pub fn namespace(&self) -> &str {
 		&self.manifest.name
 	}
 
 	/// Get built-ins namespace (manifest.builtins_namespace or package name)
+	#[must_use]
 	pub fn builtins_namespace(&self) -> String {
 		self.manifest
 			.builtins_namespace
@@ -150,6 +170,7 @@ pub struct PackageRegistry {
 
 impl PackageRegistry {
 	/// Create a new empty registry
+	#[must_use]
 	pub fn new() -> Self {
 		Self {
 			search_paths: Vec::new(),
@@ -165,14 +186,20 @@ impl PackageRegistry {
 	/// Load a package by name
 	///
 	/// Searches in all registered search paths for a directory matching the package name.
-	/// Version requirements are not yet enforced (milestone 1).
+	/// A manifest's declared version requirements are recorded but not enforced: `name`,
+	/// not a version range, selects the package that is loaded.
+	///
+	/// # Errors
+	///
+	/// Returns [`PackageError::PackageNotFound`] if no search path holds a directory named
+	/// `name` containing a `hel-package.toml`, [`PackageError::NameMismatch`] if the
+	/// manifest in that directory declares a different name, and any error from
+	/// [`SchemaPackage::from_directory`] while loading it.
 	pub fn load_package(&mut self, name: &str) -> Result<&SchemaPackage, PackageError> {
-		// Check if already loaded
 		if self.packages.contains_key(name) {
 			return Ok(&self.packages[name]);
 		}
 
-		// Search for package directory
 		let mut package_dir = None;
 		for search_path in &self.search_paths {
 			let candidate = search_path.join(name);
@@ -187,10 +214,8 @@ impl PackageRegistry {
 			search_paths: self.search_paths.clone(),
 		})?;
 
-		// Load the package
 		let package = SchemaPackage::from_directory(&dir)?;
 
-		// Verify name matches
 		if package.manifest.name != name {
 			return Err(PackageError::NameMismatch {
 				expected: name.to_string(),
@@ -204,7 +229,13 @@ impl PackageRegistry {
 
 	/// Resolve all dependencies for a root package recursively
 	///
-	/// Returns packages in deterministic topological order (dependencies first)
+	/// Returns packages in deterministic topological order (dependencies first).
+	///
+	/// # Errors
+	///
+	/// Returns [`PackageError::CircularDependency`] if the dependency graph contains a
+	/// cycle, and otherwise any error from [`PackageRegistry::load_package`] for a package
+	/// in the graph.
 	pub fn resolve_all(&mut self, root_package: &str) -> Result<Vec<String>, PackageError> {
 		let mut resolved = Vec::new();
 		let mut visiting = std::collections::HashSet::new();
@@ -220,24 +251,21 @@ impl PackageRegistry {
 		resolved: &mut Vec<String>,
 		visiting: &mut std::collections::HashSet<String>,
 	) -> Result<(), PackageError> {
-		// Cycle detection
+		// A package reached again while still being resolved is part of a cycle.
 		if visiting.contains(package_name) {
 			return Err(PackageError::CircularDependency {
 				package: package_name.to_string(),
 			});
 		}
 
-		// Already resolved
 		if resolved.contains(&package_name.to_string()) {
 			return Ok(());
 		}
 
 		visiting.insert(package_name.to_string());
 
-		// Load package
 		let package = self.load_package(package_name)?.clone();
 
-		// Resolve dependencies first
 		let deps: Vec<_> = package.manifest.dependencies.keys().cloned().collect();
 		for dep in deps {
 			self.resolve_recursive(&dep, resolved, visiting)?;
@@ -250,13 +278,20 @@ impl PackageRegistry {
 	}
 
 	/// Get a loaded package by name
+	#[must_use]
 	pub fn get_package(&self, name: &str) -> Option<&SchemaPackage> {
 		self.packages.get(name)
 	}
 
 	/// Build a merged type environment from resolved packages
 	///
-	/// Returns a map of qualified type names (package.Type) to TypeDef
+	/// Returns a map of qualified type names (`package.Type`) to their definitions.
+	///
+	/// # Errors
+	///
+	/// Returns [`PackageError::PackageNotFound`] if a name in `package_names` has not been
+	/// loaded, and [`PackageError::TypeCollision`] if two packages contribute the same
+	/// qualified type name.
 	pub fn build_type_environment(&self, package_names: &[String]) -> Result<TypeEnvironment, PackageError> {
 		let mut types = BTreeMap::new();
 
@@ -303,11 +338,21 @@ pub struct TypeEnvironment {
 
 impl TypeEnvironment {
 	/// Lookup a type by qualified name
+	#[must_use]
 	pub fn get_type(&self, qualified_name: &str) -> Option<&TypeDef> {
 		self.types.get(qualified_name)
 	}
 
 	/// Validate all type references in the environment
+	///
+	/// Unlike [`Schema::validate`](super::Schema::validate), which runs inside a single
+	/// schema, this checks references against the merged, *qualified* namespace — a
+	/// reference must be written `package.Type`, not a bare `Type`.
+	///
+	/// # Errors
+	///
+	/// Returns [`PackageError::UndefinedTypeReference`] for the first field whose type
+	/// reference has no entry in the environment, naming the enclosing type as context.
 	pub fn validate(&self) -> Result<(), PackageError> {
 		for (qualified_name, typedef) in &self.types {
 			for field in &typedef.fields {
@@ -341,32 +386,59 @@ impl TypeEnvironment {
 
 /// Package-related errors
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum PackageError {
 	/// Manifest parsing error
 	ManifestParse(String),
 	/// Schema parsing error in a specific package/file
 	SchemaParse {
+		/// Name of the package whose manifest listed the file.
 		package: String,
+		/// Schema file that failed to parse, as named in the manifest.
 		file: String,
+		/// The underlying parse failure, with line information where available.
 		error: String,
 	},
 	/// I/O error
 	Io(String),
 	/// Package not found in search paths
 	PackageNotFound {
+		/// Package name that was requested.
 		name: String,
+		/// Search paths that were consulted, for the error message.
 		search_paths: Vec<PathBuf>,
 	},
 	/// Package name mismatch
-	NameMismatch { expected: String, found: String },
+	NameMismatch {
+		/// Name that was requested.
+		expected: String,
+		/// Name the manifest actually declares.
+		found: String,
+	},
 	/// Duplicate type in same package
-	DuplicateType { package: String, type_name: String },
+	DuplicateType {
+		/// Package declaring the type twice.
+		package: String,
+		/// The type name that appeared in more than one schema file.
+		type_name: String,
+	},
 	/// Type collision across packages
-	TypeCollision { type_name: String },
+	TypeCollision {
+		/// The qualified name claimed by more than one package.
+		type_name: String,
+	},
 	/// Undefined type reference
-	UndefinedTypeReference { type_name: String, context: String },
+	UndefinedTypeReference {
+		/// The unresolvable type name, as written.
+		type_name: String,
+		/// Qualified name of the type whose field holds the reference.
+		context: String,
+	},
 	/// Circular dependency
-	CircularDependency { package: String },
+	CircularDependency {
+		/// Package that was reached again while its own dependencies were resolving.
+		package: String,
+	},
 }
 
 impl std::fmt::Display for PackageError {

@@ -10,43 +10,63 @@ use std::sync::Arc;
 pub mod package;
 pub use package::{PackageError, PackageManifest, PackageRegistry, SchemaPackage, TypeEnvironment};
 
-/// Field type definition
+/// The declared type of a schema field
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum FieldType {
+	/// A boolean.
 	Bool,
+	/// A string.
 	String,
+	/// A number, held as `f64` at evaluation time.
 	Number,
+	/// A homogeneous list whose elements all have the given type.
 	List(Box<FieldType>),
+	/// A homogeneous map whose values all have the given type.
 	Map(Box<FieldType>),
-	/// Reference to another type
+	/// A reference to a type declared elsewhere in the same schema.
+	///
+	/// Validated by [`Schema::validate`], which requires the named type to exist.
 	TypeRef(Arc<str>),
 }
 
-/// Field definition in a schema
+/// A single field of a [`TypeDef`]
 #[derive(Debug, Clone)]
 pub struct FieldDef {
+	/// Field name, as written in the schema.
 	pub name: Arc<str>,
+	/// Declared type, including the element type of `List`/`Map`.
 	pub field_type: FieldType,
+	/// Whether the field was declared with a `?` suffix and may be absent.
 	pub optional: bool,
+	/// Description of the field; [`parse_schema`] does not populate it.
 	pub description: Option<Arc<str>>,
 }
 
-/// Type definition in a schema
+/// A named type in a [`Schema`]
 #[derive(Debug, Clone)]
 pub struct TypeDef {
+	/// Type name; also the key this type is stored under in [`Schema::types`].
 	pub name: Arc<str>,
+	/// Fields in declaration order, which is preserved.
 	pub fields: Vec<FieldDef>,
+	/// Description of the type; [`parse_schema`] does not populate it.
 	pub description: Option<Arc<str>>,
 }
 
-/// Schema definition containing all types
+/// A set of named types
+///
+/// Types are held in a `BTreeMap` so iteration is sorted by name and therefore
+/// deterministic across runs.
 #[derive(Debug, Clone)]
 pub struct Schema {
+	/// The declared types, keyed by name.
 	pub types: BTreeMap<Arc<str>, TypeDef>,
 }
 
 impl Schema {
 	/// Create an empty schema
+	#[must_use]
 	pub fn new() -> Self {
 		Self { types: BTreeMap::new() }
 	}
@@ -57,11 +77,20 @@ impl Schema {
 	}
 
 	/// Get a type definition by name
+	#[must_use]
 	pub fn get_type(&self, name: &str) -> Option<&TypeDef> {
 		self.types.get(name)
 	}
 
 	/// Validate that all type references are defined
+	///
+	/// Walks every field of every type, including the element types of `List`/`Map`, and
+	/// checks each [`FieldType::TypeRef`] against the names in [`Schema::types`].
+	///
+	/// # Errors
+	///
+	/// Returns `Err` naming the first undefined type reference found. Iteration follows the
+	/// `BTreeMap` order, so the name reported is stable for a given schema.
 	pub fn validate(&self) -> Result<(), String> {
 		for type_def in self.types.values() {
 			for field in &type_def.fields {
@@ -93,7 +122,9 @@ impl Default for Schema {
 
 /// Parse a schema from HEL schema syntax
 ///
-/// Schema files use a simplified syntax:
+/// The syntax is deliberately simpler than the expression language, and is read line by
+/// line:
+///
 /// ```hel
 /// type Lead {
 ///     vertical: String
@@ -113,6 +144,35 @@ impl Default for Schema {
 ///     data: Map<String>
 /// }
 /// ```
+///
+/// Recognised primitives are `Bool`/`Boolean`, `String`, and `Number`/`Float`/`f64`;
+/// `List<T>` and `Map<T>` nest; any other name is a [`FieldType::TypeRef`]. A `?` suffix on
+/// a field name marks it [`optional`](FieldDef::optional). Blank lines and lines beginning
+/// with `//` or `#` are ignored, and trailing commas are tolerated. The finished schema is
+/// checked by [`Schema::validate`], so an undefined type reference is a parse error.
+///
+/// # Errors
+///
+/// Returns `Err` if a `type` header is malformed, if a field line has neither `:` nor a
+/// name, or if a field's type reference has no matching declaration.
+///
+/// # Examples
+///
+/// ```
+/// use hel::schema::parse_schema;
+///
+/// let schema = parse_schema("
+/// type Contact {
+///     email: String
+/// }
+///
+/// type Lead {
+///     contacts: List<Contact>
+/// }
+/// ").expect("schema should parse");
+///
+/// assert!(schema.get_type("Lead").is_some());
+/// ```
 pub fn parse_schema(input: &str) -> Result<Schema, String> {
 	let mut schema = Schema::new();
 	let mut current_type: Option<TypeDef> = None;
@@ -121,14 +181,11 @@ pub fn parse_schema(input: &str) -> Result<Schema, String> {
 	for line in input.lines() {
 		let line = line.trim();
 
-		// Skip empty lines and comments
 		if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
 			continue;
 		}
 
-		// Type definition start
 		if line.starts_with("type ") {
-			// Save previous type if any
 			if let Some(type_def) = current_type.take() {
 				schema.add_type(type_def);
 			}
@@ -147,7 +204,6 @@ pub fn parse_schema(input: &str) -> Result<Schema, String> {
 			continue;
 		}
 
-		// Type block end
 		if line == "}" {
 			if let Some(type_def) = current_type.take() {
 				schema.add_type(type_def);
@@ -156,10 +212,10 @@ pub fn parse_schema(input: &str) -> Result<Schema, String> {
 			continue;
 		}
 
-		// Field definition
 		if in_type_block && current_type.is_some() {
 			if let Some(type_def) = current_type.as_mut() {
-				// Parse field: name: Type or name?: Type for optional
+				// A `?` suffix on the name is the only difference between a required and
+				// an optional field.
 				let field_line = line.trim_end_matches(',');
 				let (field_name, rest) = if let Some(colon_pos) = field_line.find(':') {
 					(&field_line[..colon_pos], &field_line[colon_pos + 1..])
@@ -186,7 +242,6 @@ pub fn parse_schema(input: &str) -> Result<Schema, String> {
 		}
 	}
 
-	// Save last type if any
 	if let Some(type_def) = current_type {
 		schema.add_type(type_def);
 	}
