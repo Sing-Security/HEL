@@ -121,6 +121,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pure, deterministic evaluation (stable maps, no global state)
 - Apache-2.0 license
 
-[0.3.0]: https://github.com/Sing-Security/hel/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/Sing-Security/hel/compare/v0.1.1...v0.2.0
-[0.1.1]: https://github.com/Sing-Security/hel/releases/tag/v0.1.1
+[0.3.0]: https://github.com/Sing-Security/HEL/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Sing-Security/HEL/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/Sing-Security/HEL/releases/tag/v0.1.1
