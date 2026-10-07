@@ -13,9 +13,10 @@ keywords = ["expression-language", "dsl", "ast", "pest", "interpreter"]
 categories = ["compilers", "parsing", "development-tools"]
 publish = true
 
-# Ship source, README, licence, examples and the manifest — nothing else. The
-# embedded `hel-template` crate is a closed/Proprietary demonstration of the
-# `BuiltinsProvider` path and must not be vendored into the published tarball.
+# Ship source, README, licence and the manifest — nothing else. `hel-template/`
+# is a standalone example of implementing `BuiltinsProvider`; it is a separate
+# crate with its own manifest and is not part of this crate's public API, so it
+# stays out of the tarball.
 exclude = [
   "target/**",
   ".github/**",
@@ -40,10 +41,6 @@ criterion = { version = "0.5", features = ["html_reports"] }
 # out to the heap-allocated evaluator.
 default = ["arena"]
 arena = ["bumpalo"]
-
-[package.metadata.docs.rs]
-# Build without optional features that are hard for the docs.rs builder to satisfy.
-all-features = false
 
 [[bench]]
 name = "arena_bench"

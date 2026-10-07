@@ -307,8 +307,7 @@ mod integration_tests {
 	use super::*;
 
 	#[test]
-	fn test_parse_desmond_schema() {
-		// This would be loaded from products/Desmond/schema/00_domain.hel in production
+	fn test_parse_binary_schema() {
 		let schema_text = r#"
 type Binary {
     format: String
@@ -328,7 +327,7 @@ type Import {
 }
 "#;
 
-		let schema = parse_schema(schema_text).expect("Failed to parse Desmond schema");
+		let schema = parse_schema(schema_text).expect("Failed to parse binary schema");
 		assert!(schema.get_type("Binary").is_some());
 		assert!(schema.get_type("Security").is_some());
 		assert!(schema.get_type("Import").is_some());
@@ -339,8 +338,7 @@ type Import {
 	}
 
 	#[test]
-	fn test_parse_fidelis_schema() {
-		// Example CRM/lead schema
+	fn test_parse_crm_schema() {
 		let schema_text = r#"
 type Lead {
     vertical: String
@@ -360,7 +358,7 @@ type Enrichment {
 }
 "#;
 
-		let schema = parse_schema(schema_text).expect("Failed to parse Fidelis schema");
+		let schema = parse_schema(schema_text).expect("Failed to parse CRM schema");
 		assert!(schema.get_type("Lead").is_some());
 		assert!(schema.get_type("Contact").is_some());
 		assert!(schema.get_type("Enrichment").is_some());

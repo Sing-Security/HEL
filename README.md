@@ -1,11 +1,11 @@
-# HEL — Heuristics Expression Language
+# HEL — Heuristic Expression Language
 
 Status: OPEN — Apache-2.0  
 SPDX-License-Identifier: Apache-2.0
 
 ## Overview
 
-- HEL (Internally Hermes Expression Language) is a small, deterministic, auditable expression language and reference implementation.
+- HEL (Heuristic Expression Language) is a small, deterministic, auditable expression language and reference implementation.
 - This crate implements the open core: a pest-based parser, a compact typed AST, deterministic evaluator(s), a pluggable builtins registry, schema/package loaders for domain types, and a trace facility that produces stable, auditable evaluation traces.
 - The crate is intentionally product-agnostic: domain-specific or proprietary built-ins and rule packs should be implemented and shipped separately and injected at runtime via the builtins provider interface.
 
@@ -334,7 +334,6 @@ Documentation and where to look next
   - `hel::builtins` — provider/registry API and `CoreBuiltinsProvider`.
   - `hel::trace` — trace capture and pretty-print helpers.
   - `hel::parse_rule` and the AST in `src/lib.rs`.
-- Local docs: `docs/USAGE.md` and `docs/SCHEMA.md` (examples and schema/package format).
 - Tests in `src/*` demonstrate intended semantics and edge-case behavior (NaN handling, builtins, trace order, package registry collision detection).
 
 Contributing
