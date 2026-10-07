@@ -71,6 +71,7 @@ assert!(result);
 For high-throughput scenarios (e.g., evaluating hundreds of rules per request), HEL provides an arena allocator that dramatically improves performance by reducing allocation overhead and improving cache locality:
 
 ```rust
+# #[cfg(feature = "arena")] {
 use hel::arena::{ArenaParser, evaluate_arena};
 use hel::{FactsEvalContext, Value};
 
@@ -78,12 +79,13 @@ let mut ctx = FactsEvalContext::new();
 ctx.add_fact("binary.arch", Value::String("x86_64".into()));
 ctx.add_fact("security.nx", Value::Bool(false));
 
-// Create arena parser (can be reused across many evaluations)
+// One parser, reused across evaluations.
 let parser = ArenaParser::new();
 
 let expr = r#"binary.arch == "x86_64" AND security.nx == false"#;
 let result = evaluate_arena(expr, &ctx, &parser).expect("evaluation failed");  // true
 assert!(result);
+# }
 ```
 
 **When to use arena allocation:**
@@ -99,6 +101,7 @@ assert!(result);
 **Example: Reusing arena for multiple evaluations:**
 
 ```rust
+# #[cfg(feature = "arena")] {
 use hel::arena::{ArenaParser, evaluate_arena};
 use hel::{FactsEvalContext, Value};
 
@@ -107,16 +110,14 @@ ctx.add_fact("data.x", Value::Number(42.0));
 
 let mut parser = ArenaParser::new();
 
-// Evaluate first expression
 let result1 = evaluate_arena(r#"data.x == 42"#, &ctx, &parser).expect("eval failed");
 assert!(result1);
 
-// Reset arena to reuse memory
 parser.reset();
 
-// Evaluate second expression (reuses arena memory)
 let result2 = evaluate_arena(r#"data.x > 0"#, &ctx, &parser).expect("eval failed");
 assert!(result2);
+# }
 ```
 
 ## Goals

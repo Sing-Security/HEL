@@ -17,10 +17,8 @@ categories = ["compilers", "parsing", "development-tools"]
 rust-version = "1.85"
 publish = true
 
-# Ship source, README, licence and the manifest — nothing else. `hel-template/`
-# is a standalone example of implementing `BuiltinsProvider`; it is a separate
-# crate with its own manifest and is not part of this crate's public API, so it
-# stays out of the tarball.
+# Ship source, README, licence and manifest only. `hel-template/` is a standalone
+# `BuiltinsProvider` example crate with its own manifest, not part of this crate's API.
 exclude = [
   "target/**",
   ".github/**",
