@@ -81,13 +81,46 @@ impl Default for EvalTrace {
 
 /// Evaluate a condition with tracing enabled
 ///
-/// This function evaluates the condition and captures a detailed trace showing
-/// which atoms were evaluated, what values they resolved to, and what the results were.
+/// Evaluates `condition` and records, for each atom in the expression, the value it
+/// resolved to and the result it produced. Pass a `builtins` registry when the
+/// expression calls functions; pass `None` otherwise. The returned [`EvalTrace`]
+/// carries the final result, the ordered atoms, and the sorted set of facts read.
+///
+/// # Errors
+///
+/// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
+/// [`EvalError::UnknownAttribute`] if the resolver returns `None` for an attribute
+/// the expression reads, [`EvalError::InvalidOperation`] if the expression calls a
+/// function that `builtins` does not define, and [`EvalError::TypeMismatch`] if an
+/// operand has the wrong type for its operator.
+///
+/// # Examples
+///
+/// ```
+/// use hel::trace::evaluate_with_trace;
+/// use hel::{HelResolver, Value};
+///
+/// struct MyResolver;
+/// impl HelResolver for MyResolver {
+///     fn resolve_attr(&self, object: &str, field: &str) -> Option<Value> {
+///         match (object, field) {
+///             ("binary", "arch") => Some(Value::String("x86_64".into())),
+///             _ => None,
+///         }
+///     }
+/// }
+///
+/// let trace = evaluate_with_trace(r#"binary.arch == "x86_64""#, &MyResolver, None)
+///     .expect("evaluation failed");
+/// assert!(trace.result);
+/// assert_eq!(trace.facts_used(), vec!["binary.arch".to_string()]);
+/// ```
 pub fn evaluate_with_trace(
     condition: &str,
     resolver: &dyn crate::HelResolver,
     builtins: Option<&crate::builtins::BuiltinsRegistry>,
 ) -> Result<EvalTrace, EvalError> {
+    crate::validate_expression(condition).map_err(|e| EvalError::ParseError(e.to_string()))?;
     let ast = crate::parse_rule(condition);
     let ctx = if let Some(b) = builtins {
         EvalContext::with_builtins(resolver, b)

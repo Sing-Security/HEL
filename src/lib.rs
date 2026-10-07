@@ -600,17 +600,13 @@ impl From<EvalError> for HelError {
 
 /// Parse a HEL expression into an AST (low-level API)
 ///
-/// This is a low-level parsing function that parses a HEL expression directly
-/// into an AST without validation. It will panic on parse errors.
+/// The whole of `input` must be a single valid HEL expression — trailing content is a
+/// parse error, not something ignored. Prefer [`parse_expression`] or
+/// [`validate_expression`], which report the failure as a `Result` instead of panicking.
 ///
 /// # Panics
 ///
-/// Panics if the input cannot be parsed as a valid HEL expression.
-///
-/// # Note
-///
-/// Most users should use `parse_expression()` or `validate_expression()` instead,
-/// which return `Result` types and provide better error handling.
+/// Panics if `input` is not a valid HEL expression.
 ///
 /// # Examples
 ///
@@ -620,13 +616,13 @@ impl From<EvalError> for HelError {
 /// let ast = parse_rule(r#"binary.format == "elf""#);
 /// ```
 pub fn parse_rule(input: &str) -> AstNode {
-    let mut pairs = HelParser::parse(Rule::condition, input).expect("parse error");
+    let mut pairs = HelParser::parse(Rule::top, input).expect("parse error");
     build_ast(pairs.next().unwrap())
 }
 
 fn build_ast(pair: Pair<Rule>) -> AstNode {
     match pair.as_rule() {
-        Rule::condition => {
+        Rule::top | Rule::condition => {
             let mut inner = pair.into_inner();
             let next = inner.next().expect("Empty condition");
             build_ast(next)
@@ -775,22 +771,17 @@ fn parse_comparator(pair: Pair<Rule>) -> Comparator {
 
 /// Evaluate a HEL expression with a custom resolver (low-level API)
 ///
-/// This function evaluates a HEL expression using a custom resolver to provide
-/// attribute values. It does not support built-in functions.
+/// Evaluates `condition` against attribute values supplied by `resolver`. Built-in
+/// functions are not available — use [`evaluate_with_context`] when the expression
+/// calls any. Most callers are better served by [`evaluate`], which pairs with
+/// [`FactsEvalContext`].
 ///
-/// # Arguments
+/// # Errors
 ///
-/// * `condition` - The HEL expression to evaluate
-/// * `resolver` - Implementation of `HelResolver` to provide attribute values
-///
-/// # Returns
-///
-/// Returns `Ok(true)` if the condition evaluates to true, `Ok(false)` otherwise.
-/// Returns `Err` if evaluation fails due to type mismatches or other errors.
-///
-/// # Note
-///
-/// Most users should use the simpler `evaluate()` function with `FactsEvalContext` instead.
+/// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
+/// [`EvalError::UnknownAttribute`] if the resolver returns `None` for an attribute
+/// the expression reads, and [`EvalError::TypeMismatch`] if an operand has the wrong
+/// type for its operator. The top-level expression must evaluate to a boolean.
 ///
 /// # Examples
 ///
@@ -817,6 +808,7 @@ pub fn evaluate_with_resolver(
     condition: &str,
     resolver: &dyn HelResolver,
 ) -> Result<bool, EvalError> {
+    validate_expression(condition).map_err(|e| EvalError::ParseError(e.to_string()))?;
     let ast = parse_rule(condition);
     let ctx = EvalContext::new(resolver);
     evaluate_ast_with_context(&ast, &ctx)
@@ -824,19 +816,18 @@ pub fn evaluate_with_resolver(
 
 /// Evaluate a HEL expression with resolver and built-in functions (low-level API)
 ///
-/// This function evaluates a HEL expression using both a custom resolver and
-/// a built-ins registry to support function calls.
+/// Like [`evaluate_with_resolver`], but the expression may also call the functions
+/// held by `builtins`. Resolution of function names is namespace-qualified and
+/// deterministic.
 ///
-/// # Arguments
+/// # Errors
 ///
-/// * `condition` - The HEL expression to evaluate
-/// * `resolver` - Implementation of `HelResolver` to provide attribute values
-/// * `builtins` - Registry of built-in functions
-///
-/// # Returns
-///
-/// Returns `Ok(true)` if the condition evaluates to true, `Ok(false)` otherwise.
-/// Returns `Err` if evaluation fails.
+/// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
+/// [`EvalError::UnknownAttribute`] if the resolver returns `None` for an attribute
+/// the expression reads, [`EvalError::InvalidOperation`] if the expression calls a
+/// function that `builtins` does not define or passes it arguments it rejects, and
+/// [`EvalError::TypeMismatch`] if an operand has the wrong type for its operator.
+/// The top-level expression must evaluate to a boolean.
 ///
 /// # Examples
 ///
@@ -863,6 +854,7 @@ pub fn evaluate_with_context(
     resolver: &dyn HelResolver,
     builtins: &builtins::BuiltinsRegistry,
 ) -> Result<bool, EvalError> {
+    validate_expression(condition).map_err(|e| EvalError::ParseError(e.to_string()))?;
     let ast = parse_rule(condition);
     let ctx = EvalContext::with_builtins(resolver, builtins);
     evaluate_ast_with_context(&ast, &ctx)
@@ -1069,7 +1061,7 @@ pub type Expression = AstNode;
 /// assert!(validate_expression(bad_expr).is_err());
 /// ```
 pub fn validate_expression(expr: &str) -> Result<(), HelError> {
-    match HelParser::parse(Rule::condition, expr) {
+    match HelParser::parse(Rule::top, expr) {
         Ok(_) => Ok(()),
         Err(e) => {
             let (line, column) = match &e.line_col {
@@ -1134,22 +1126,6 @@ impl FactsEvalContext {
         self.facts.insert(key.to_string(), value);
     }
 
-    /// Create a context from JSON data
-    ///
-    /// **Note**: This method is currently not implemented and will return an empty context.
-    /// A full implementation would require the `serde_json` dependency.
-    ///
-    /// The JSON should be an object where keys are fact names (e.g., "binary.arch")
-    /// and values are the fact values.
-    ///
-    /// # TODO
-    ///
-    /// Implement proper JSON parsing once serde_json is added as a dependency.
-    pub fn from_json(_json: &str) -> Result<Self, HelError> {
-        // Placeholder implementation
-        // TODO: Implement proper JSON parsing with serde_json
-        Ok(Self::new())
-    }
 }
 
 impl Default for FactsEvalContext {
@@ -1517,6 +1493,91 @@ mod tests {
             assert!(e.line.is_some());
             assert!(e.column.is_some());
         }
+    }
+
+    /// The grammar is anchored with `SOI`/`EOI`: an input must be *entirely* one valid
+    /// expression. Without the anchors pest matches a prefix, so `x == 5 garbage` would
+    /// validate as the shorter valid expression `x` and the trailing text would be
+    /// silently dropped — which would make `validate_expression` useless as a guard.
+    #[test]
+    fn test_validate_expression_rejects_partial_matches() {
+        for bad in [
+            "x ==",
+            "x =",
+            "x == 5 AND",
+            "x == 5 garbage",
+            "AND x == 5",
+            "x == 5 == 6",
+            "hello world",
+            "core.len(]",
+            "x == 5)",
+            "(x == 5",
+            "",
+            "   ",
+        ] {
+            assert!(
+                validate_expression(bad).is_err(),
+                "{:?} should not validate",
+                bad
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_expression_accepts_full_expressions() {
+        for good in [
+            r#"binary.arch == "x86_64""#,
+            "  x == 5  ",
+            "x == 5\n",
+            r#"(a == 1 AND b == 2) OR c == 3"#,
+            r#"core.len(["a","b"]) == 2"#,
+            r#"manifest.permissions CONTAINS "A""#,
+            "$v == 1",
+            "%s == 1",
+        ] {
+            assert!(
+                validate_expression(good).is_ok(),
+                "{:?} should validate",
+                good
+            );
+        }
+    }
+
+    /// Malformed input reaches the low-level evaluators as `Err`, not as a panic — the
+    /// contract their docs advertise. `parse_rule` is the deliberate exception.
+    #[test]
+    fn test_evaluators_report_parse_errors_instead_of_panicking() {
+        struct EmptyResolver;
+        impl HelResolver for EmptyResolver {
+            fn resolve_attr(&self, _: &str, _: &str) -> Option<Value> {
+                None
+            }
+        }
+
+        let result = evaluate_with_resolver("x == 5 garbage", &EmptyResolver);
+        assert!(
+            matches!(result, Err(EvalError::ParseError(_))),
+            "got {:?}",
+            result
+        );
+
+        let mut registry = builtins::BuiltinsRegistry::new();
+        registry
+            .register(&builtins::CoreBuiltinsProvider)
+            .expect("register failed");
+        let result = evaluate_with_context("x ==", &EmptyResolver, &registry);
+        assert!(
+            matches!(result, Err(EvalError::ParseError(_))),
+            "got {:?}",
+            result
+        );
+
+        let result = trace::evaluate_with_trace("x == 5 AND", &EmptyResolver, None);
+        assert!(
+            matches!(result, Err(EvalError::ParseError(_))),
+            "got {:?}",
+            result
+        );
     }
 
     #[test]

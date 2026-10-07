@@ -1,4 +1,14 @@
+// HEL grammar.
+//
+// `top` is the entry rule used by `validate_expression` / `parse_rule`. It is anchored
+// with `SOI`/`EOI` because pest matches a *prefix*: without the anchors an input such as
+// `binary.arch == "elf" garbage` would parse as the shorter valid prefix and the trailing
+// text would be silently ignored, making syntax validation meaningless. Inner rules such
+// as `parenthesized` recurse through the unanchored `condition` so nesting still works.
+
 WHITESPACE      = _{ " " | "\t" | "\n" | "\r" }
+
+top             =  { SOI ~ condition ~ EOI }
 
 condition       =  { logical_or }
 

@@ -155,34 +155,49 @@ impl ArenaParser {
 
     /// Parse a HEL rule into an arena-allocated AST
     ///
-    /// # Arguments
-    ///
-    /// * `input` - The HEL expression string to parse
-    ///
-    /// # Returns
-    ///
-    /// Returns a reference to the parsed AST node, which borrows from `self`.
-    /// The node is valid as long as the parser is not reset or dropped.
+    /// The returned node borrows from `self` and stays valid until the parser is
+    /// reset or dropped. Prefer [`ArenaParser::parse_expression`] unless the input is
+    /// already known to be well-formed.
     ///
     /// # Panics
     ///
-    /// Panics if the input fails to parse. For production use, consider using
-    /// `parse_expression()` which returns a `Result` instead.
+    /// Panics if `input` fails to parse.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hel::arena::ArenaParser;
+    ///
+    /// let parser = ArenaParser::new();
+    /// let ast = parser.parse_rule(r#"x == 10 AND y > 5"#);
+    /// // `ast` borrows from the parser's arena rather than the heap.
+    /// assert!(format!("{ast:?}").contains("And"));
+    /// ```
     pub fn parse_rule<'a>(&'a self, input: &str) -> &'a AstNode<'a> {
-        let mut pairs = HelParser::parse(Rule::condition, input)
+        let mut pairs = HelParser::parse(Rule::top, input)
             .unwrap_or_else(|e| panic!("Failed to parse expression: {}", e));
         self.build_ast_arena(pairs.next().unwrap())
     }
 
     /// Parse a HEL expression with validation
     ///
-    /// # Arguments
+    /// The fallible counterpart to [`ArenaParser::parse_rule`]: the input is validated
+    /// before the AST is built, so malformed expressions yield `Err` instead of a panic.
     ///
-    /// * `expr` - The HEL expression string to parse
+    /// # Errors
     ///
-    /// # Returns
+    /// Returns [`HelError`] with line and column information if `expr` is not a valid
+    /// HEL expression.
     ///
-    /// Returns `Ok` with a reference to the parsed AST node, or `Err` if parsing fails.
+    /// # Examples
+    ///
+    /// ```
+    /// use hel::arena::ArenaParser;
+    ///
+    /// let parser = ArenaParser::new();
+    /// assert!(parser.parse_expression(r#"x == 10"#).is_ok());
+    /// assert!(parser.parse_expression("x ==").is_err());
+    /// ```
     pub fn parse_expression<'a>(&'a self, expr: &str) -> Result<&'a AstNode<'a>, HelError> {
         crate::validate_expression(expr)?;
         Ok(self.parse_rule(expr))
@@ -190,13 +205,16 @@ impl ArenaParser {
 
     /// Reset the arena for reuse
     ///
-    /// This clears all allocations and allows the arena memory to be reused
-    /// for subsequent parses. This is more efficient than creating a new parser.
+    /// Frees every allocation in one step and makes the memory available to subsequent
+    /// parses, which is cheaper than dropping the parser and building a new one.
     ///
     /// # Warning
     ///
-    /// All AST nodes previously returned by this parser become invalid after reset.
-    /// Using them will lead to undefined behavior.
+    /// Every AST node previously returned by this parser is invalidated by the reset.
+    /// The borrow checker enforces this: `reset` takes `&mut self` while a returned node
+    /// holds `&self`, so a node that is still alive cannot coexist with a reset. The
+    /// hazard is purely a runtime one the type system already prevents — there is no way
+    /// to hold a stale node across a call to this method in safe code.
     pub fn reset(&mut self) {
         self.arena.reset();
     }
@@ -207,7 +225,7 @@ impl ArenaParser {
         pair: pest::iterators::Pair<Rule>,
     ) -> &'a AstNode<'a> {
         let node = match pair.as_rule() {
-            Rule::condition => {
+            Rule::top | Rule::condition => {
                 let mut inner = pair.into_inner();
                 let next = inner.next().expect("Empty condition");
                 return self.build_ast_arena(next);
@@ -454,22 +472,23 @@ pub fn evaluate_arena(
 /// Evaluate arena AST with a resolver
 ///
 /// Low-level API for evaluating an arena-allocated AST with a custom resolver.
+/// Built-in functions are not available — use [`evaluate_with_context_arena`] when
+/// the expression calls any.
 ///
-/// # Arguments
+/// # Errors
 ///
-/// * `condition` - The HEL expression string to evaluate
-/// * `resolver` - Implementation of `HelResolver` to provide attribute values
-/// * `parser` - Arena parser
-///
-/// # Returns
-///
-/// Returns `Ok(true)` if the condition evaluates to true, `Ok(false)` otherwise.
+/// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
+/// [`EvalError::UnknownAttribute`] if the resolver returns `None` for an attribute
+/// the expression reads, and [`EvalError::TypeMismatch`] if an operand has the wrong
+/// type for its operator. The top-level expression must evaluate to a boolean.
 pub fn evaluate_with_resolver_arena(
     condition: &str,
     resolver: &dyn HelResolver,
     parser: &ArenaParser,
 ) -> Result<bool, EvalError> {
-    let ast = parser.parse_rule(condition);
+    let ast = parser
+        .parse_expression(condition)
+        .map_err(|e| EvalError::ParseError(e.to_string()))?;
     let ctx = ArenaEvalContext::new(resolver);
     evaluate_ast_arena(ast, &ctx)
 }
@@ -479,23 +498,23 @@ pub fn evaluate_with_resolver_arena(
 /// Low-level API for evaluating an arena-allocated AST with a custom resolver
 /// and built-in functions.
 ///
-/// # Arguments
+/// # Errors
 ///
-/// * `condition` - The HEL expression string to evaluate
-/// * `resolver` - Implementation of `HelResolver` to provide attribute values
-/// * `builtins` - Registry of built-in functions
-/// * `parser` - Arena parser
-///
-/// # Returns
-///
-/// Returns `Ok(true)` if the condition evaluates to true, `Ok(false)` otherwise.
+/// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
+/// [`EvalError::UnknownAttribute`] if the resolver returns `None` for an attribute
+/// the expression reads, [`EvalError::InvalidOperation`] if the expression calls a
+/// function that `builtins` does not define or passes it arguments it rejects, and
+/// [`EvalError::TypeMismatch`] if an operand has the wrong type for its operator.
+/// The top-level expression must evaluate to a boolean.
 pub fn evaluate_with_context_arena(
     condition: &str,
     resolver: &dyn HelResolver,
     builtins: &BuiltinsRegistry,
     parser: &ArenaParser,
 ) -> Result<bool, EvalError> {
-    let ast = parser.parse_rule(condition);
+    let ast = parser
+        .parse_expression(condition)
+        .map_err(|e| EvalError::ParseError(e.to_string()))?;
     let ctx = ArenaEvalContext::with_builtins(resolver, builtins);
     evaluate_ast_arena(ast, &ctx)
 }
