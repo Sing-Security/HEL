@@ -1,46 +1,27 @@
 [package]
 name = "hel"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "HEL — Heuristic Expression Language: a deterministic, auditable expression language & parser, AST, builtin registry and evaluator."
 readme = "README.md"
 license = "Apache-2.0"
-
-# Replace the placeholder values below with your actual repository/homepage information.
 repository = "https://github.com/Sing-Security/hel"
 homepage = "https://github.com/Sing-Security/hel"
 documentation = "https://docs.rs/hel"
-# Provide real author info before publishing
 authors = ["Joshua Fath <joshuaf@lfam.us>"]
 keywords = ["expression-language", "dsl", "ast", "pest", "interpreter"]
-# Categories should be chosen from the crates.io category list. Adjust as needed.
 categories = ["compilers", "parsing", "development-tools"]
-# Whether to allow publishing; keep true for crates.io publication.
 publish = true
 
-# Files to include in the published crate. This is intentionally conservative:
-# include only the source, README, license, examples and manifest. Adjust if you
-# need to ship additional files.
+# Ship source, README, licence, examples and the manifest — nothing else. The
+# embedded `hel-template` crate is a closed/Proprietary demonstration of the
+# `BuiltinsProvider` path and must not be vendored into the published tarball.
 exclude = [
   "target/**",
   ".github/**",
-  "hel/target/**",
-  "**/*.rs.bk",
-  "ci/**",
   "hel-template/**",
-  "examples/local-only/**",
-  "target/doc/**",
+  "**/*.rs.bk",
 ]
-
-# If you prefer an exclusion list instead of explicit includes, comment the `include`
-# above and use `exclude` to avoid shipping build artifacts, CI files, or local-only templates.
-# exclude = [
-#   "target/**",
-#   ".github/**",
-#   "hel/target/**",
-#   "**/*.rs.bk",
-#   "ci/**",
-# ]
 
 [dependencies]
 pest = "2.0"
@@ -54,30 +35,16 @@ tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [features]
-# Keep features minimal and additive. If you later gate optional deps, add them here.
+# Features stay minimal and additive. `arena` is on by default because it is a
+# pure performance win with no API removed; `default-features = false` opts back
+# out to the heap-allocated evaluator.
 default = ["arena"]
 arena = ["bumpalo"]
 
-[badges]
-# You can update these once you have CI/docs set up.
-# Example:
-# travis-ci = { repository = "<your-org>/hel", branch = "main" }
-
 [package.metadata.docs.rs]
-# Ensure docs.rs builds docs without optional features that are hard to satisfy.
+# Build without optional features that are hard for the docs.rs builder to satisfy.
 all-features = false
-# If the crate needs a specific rustdoc flags or target, set them here:
-# rustdoc-args = ["--cfg", "docsrs"]
-
-# Optional metadata for consumers and CI tooling (replace placeholders as appropriate).
-[package.metadata]
-# Recommended: keep a short changelog or release notes pointer.
-changelog = "CHANGELOG.md"
-# Optional: structured metadata your internal tools might use
-# hel = { stable = true, compatibility = "semver" }
 
 [[bench]]
 name = "arena_bench"
 harness = false
-
-# End of file
