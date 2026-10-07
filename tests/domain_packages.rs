@@ -177,8 +177,8 @@ fn test_build_type_environment_with_multiple_packages() {
     assert!(env.get_type("sales-crm.Lead").is_some());
     assert!(env.get_type("sales-crm.Contact").is_some());
 
-    // Note: Cross-package validation would require qualified type references in schemas
-    // For now, we just check that types are loaded correctly
+    // Cross-package validation would need qualified type references in schemas, which these
+    // fixtures do not carry, so this test stops at the types having loaded at all.
 }
 
 #[test]
