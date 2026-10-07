@@ -14,44 +14,44 @@ pub use package::{PackageError, PackageManifest, PackageRegistry, SchemaPackage,
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum FieldType {
-	/// A boolean.
-	Bool,
-	/// A string.
-	String,
-	/// A number, held as `f64` at evaluation time.
-	Number,
-	/// A homogeneous list whose elements all have the given type.
-	List(Box<FieldType>),
-	/// A homogeneous map whose values all have the given type.
-	Map(Box<FieldType>),
-	/// A reference to a type declared elsewhere in the same schema.
-	///
-	/// Validated by [`Schema::validate`], which requires the named type to exist.
-	TypeRef(Arc<str>),
+    /// A boolean.
+    Bool,
+    /// A string.
+    String,
+    /// A number, held as `f64` at evaluation time.
+    Number,
+    /// A homogeneous list whose elements all have the given type.
+    List(Box<FieldType>),
+    /// A homogeneous map whose values all have the given type.
+    Map(Box<FieldType>),
+    /// A reference to a type declared elsewhere in the same schema.
+    ///
+    /// Validated by [`Schema::validate`], which requires the named type to exist.
+    TypeRef(Arc<str>),
 }
 
 /// A single field of a [`TypeDef`]
 #[derive(Debug, Clone)]
 pub struct FieldDef {
-	/// Field name, as written in the schema.
-	pub name: Arc<str>,
-	/// Declared type, including the element type of `List`/`Map`.
-	pub field_type: FieldType,
-	/// Whether the field was declared with a `?` suffix and may be absent.
-	pub optional: bool,
-	/// Description of the field; [`parse_schema`] does not populate it.
-	pub description: Option<Arc<str>>,
+    /// Field name, as written in the schema.
+    pub name: Arc<str>,
+    /// Declared type, including the element type of `List`/`Map`.
+    pub field_type: FieldType,
+    /// Whether the field was declared with a `?` suffix and may be absent.
+    pub optional: bool,
+    /// Description of the field; [`parse_schema`] does not populate it.
+    pub description: Option<Arc<str>>,
 }
 
 /// A named type in a [`Schema`]
 #[derive(Debug, Clone)]
 pub struct TypeDef {
-	/// Type name; also the key this type is stored under in [`Schema::types`].
-	pub name: Arc<str>,
-	/// Fields in declaration order, which is preserved.
-	pub fields: Vec<FieldDef>,
-	/// Description of the type; [`parse_schema`] does not populate it.
-	pub description: Option<Arc<str>>,
+    /// Type name; also the key this type is stored under in [`Schema::types`].
+    pub name: Arc<str>,
+    /// Fields in declaration order, which is preserved.
+    pub fields: Vec<FieldDef>,
+    /// Description of the type; [`parse_schema`] does not populate it.
+    pub description: Option<Arc<str>>,
 }
 
 /// A set of named types
@@ -60,64 +60,66 @@ pub struct TypeDef {
 /// deterministic across runs.
 #[derive(Debug, Clone)]
 pub struct Schema {
-	/// The declared types, keyed by name.
-	pub types: BTreeMap<Arc<str>, TypeDef>,
+    /// The declared types, keyed by name.
+    pub types: BTreeMap<Arc<str>, TypeDef>,
 }
 
 impl Schema {
-	/// Create an empty schema
-	#[must_use]
-	pub fn new() -> Self {
-		Self { types: BTreeMap::new() }
-	}
+    /// Create an empty schema
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            types: BTreeMap::new(),
+        }
+    }
 
-	/// Add a type definition to the schema
-	pub fn add_type(&mut self, type_def: TypeDef) {
-		self.types.insert(type_def.name.clone(), type_def);
-	}
+    /// Add a type definition to the schema
+    pub fn add_type(&mut self, type_def: TypeDef) {
+        self.types.insert(type_def.name.clone(), type_def);
+    }
 
-	/// Get a type definition by name
-	#[must_use]
-	pub fn get_type(&self, name: &str) -> Option<&TypeDef> {
-		self.types.get(name)
-	}
+    /// Get a type definition by name
+    #[must_use]
+    pub fn get_type(&self, name: &str) -> Option<&TypeDef> {
+        self.types.get(name)
+    }
 
-	/// Validate that all type references are defined
-	///
-	/// Walks every field of every type, including the element types of `List`/`Map`, and
-	/// checks each [`FieldType::TypeRef`] against the names in [`Schema::types`].
-	///
-	/// # Errors
-	///
-	/// Returns `Err` naming the first undefined type reference found. Iteration follows the
-	/// `BTreeMap` order, so the name reported is stable for a given schema.
-	pub fn validate(&self) -> Result<(), String> {
-		for type_def in self.types.values() {
-			for field in &type_def.fields {
-				self.validate_field_type(&field.field_type)?;
-			}
-		}
-		Ok(())
-	}
+    /// Validate that all type references are defined
+    ///
+    /// Walks every field of every type, including the element types of `List`/`Map`, and
+    /// checks each [`FieldType::TypeRef`] against the names in [`Schema::types`].
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` naming the first undefined type reference found. Iteration follows the
+    /// `BTreeMap` order, so the name reported is stable for a given schema.
+    pub fn validate(&self) -> Result<(), String> {
+        for type_def in self.types.values() {
+            for field in &type_def.fields {
+                self.validate_field_type(&field.field_type)?;
+            }
+        }
+        Ok(())
+    }
 
-	fn validate_field_type(&self, field_type: &FieldType) -> Result<(), String> {
-		match field_type {
-			FieldType::TypeRef(name) => {
-				if !self.types.contains_key(name) {
-					return Err(format!("Undefined type reference: {}", name));
-				}
-				Ok(())
-			}
-			FieldType::List(inner) | FieldType::Map(inner) => self.validate_field_type(inner),
-			_ => Ok(()),
-		}
-	}
+    fn validate_field_type(&self, field_type: &FieldType) -> Result<(), String> {
+        match field_type {
+            FieldType::TypeRef(name) => {
+                if !self.types.contains_key(name) {
+                    return Err(format!("Undefined type reference: {}", name));
+                }
+                Ok(())
+            }
+            FieldType::List(inner) | FieldType::Map(inner) => self.validate_field_type(inner),
+            _ => Ok(()),
+        }
+    }
 }
 
 impl Default for Schema {
-	fn default() -> Self {
-		Self::new()
-	}
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Parse a schema from HEL schema syntax
@@ -174,134 +176,135 @@ impl Default for Schema {
 /// assert!(schema.get_type("Lead").is_some());
 /// ```
 pub fn parse_schema(input: &str) -> Result<Schema, String> {
-	let mut schema = Schema::new();
-	let mut current_type: Option<TypeDef> = None;
-	let mut in_type_block = false;
+    let mut schema = Schema::new();
+    let mut current_type: Option<TypeDef> = None;
+    let mut in_type_block = false;
 
-	for line in input.lines() {
-		let line = line.trim();
+    for line in input.lines() {
+        let line = line.trim();
 
-		if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
-			continue;
-		}
+        if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
+            continue;
+        }
 
-		if line.starts_with("type ") {
-			if let Some(type_def) = current_type.take() {
-				schema.add_type(type_def);
-			}
+        if line.starts_with("type ") {
+            if let Some(type_def) = current_type.take() {
+                schema.add_type(type_def);
+            }
 
-			let parts: Vec<&str> = line.split_whitespace().collect();
-			if parts.len() < 3 || parts[2] != "{" {
-				return Err(format!("Invalid type definition: {}", line));
-			}
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 3 || parts[2] != "{" {
+                return Err(format!("Invalid type definition: {}", line));
+            }
 
-			current_type = Some(TypeDef {
-				name: parts[1].into(),
-				fields: Vec::new(),
-				description: None,
-			});
-			in_type_block = true;
-			continue;
-		}
+            current_type = Some(TypeDef {
+                name: parts[1].into(),
+                fields: Vec::new(),
+                description: None,
+            });
+            in_type_block = true;
+            continue;
+        }
 
-		if line == "}" {
-			if let Some(type_def) = current_type.take() {
-				schema.add_type(type_def);
-			}
-			in_type_block = false;
-			continue;
-		}
+        if line == "}" {
+            if let Some(type_def) = current_type.take() {
+                schema.add_type(type_def);
+            }
+            in_type_block = false;
+            continue;
+        }
 
-		if in_type_block && current_type.is_some() {
-			if let Some(type_def) = current_type.as_mut() {
-				// A `?` suffix on the name is the only difference between a required and
-				// an optional field.
-				let field_line = line.trim_end_matches(',');
-				let (field_name, rest) = if let Some(colon_pos) = field_line.find(':') {
-					(&field_line[..colon_pos], &field_line[colon_pos + 1..])
-				} else {
-					return Err(format!("Invalid field definition: {}", line));
-				};
+        if in_type_block && current_type.is_some() {
+            if let Some(type_def) = current_type.as_mut() {
+                // A `?` suffix on the name is the only difference between a required and
+                // an optional field.
+                let field_line = line.trim_end_matches(',');
+                let (field_name, rest) = if let Some(colon_pos) = field_line.find(':') {
+                    (&field_line[..colon_pos], &field_line[colon_pos + 1..])
+                } else {
+                    return Err(format!("Invalid field definition: {}", line));
+                };
 
-				let (name, optional) = if let Some(name_without_suffix) = field_name.strip_suffix('?') {
-					(name_without_suffix, true)
-				} else {
-					(field_name, false)
-				};
+                let (name, optional) =
+                    if let Some(name_without_suffix) = field_name.strip_suffix('?') {
+                        (name_without_suffix, true)
+                    } else {
+                        (field_name, false)
+                    };
 
-				let type_str = rest.trim();
-				let field_type = parse_field_type(type_str)?;
+                let type_str = rest.trim();
+                let field_type = parse_field_type(type_str)?;
 
-				type_def.fields.push(FieldDef {
-					name: name.trim().into(),
-					field_type,
-					optional,
-					description: None,
-				});
-			}
-		}
-	}
+                type_def.fields.push(FieldDef {
+                    name: name.trim().into(),
+                    field_type,
+                    optional,
+                    description: None,
+                });
+            }
+        }
+    }
 
-	if let Some(type_def) = current_type {
-		schema.add_type(type_def);
-	}
+    if let Some(type_def) = current_type {
+        schema.add_type(type_def);
+    }
 
-	schema.validate()?;
-	Ok(schema)
+    schema.validate()?;
+    Ok(schema)
 }
 
 fn parse_field_type(type_str: &str) -> Result<FieldType, String> {
-	let type_str = type_str.trim();
+    let type_str = type_str.trim();
 
-	// List<T>
-	if type_str.starts_with("List<") && type_str.ends_with('>') {
-		let inner = &type_str[5..type_str.len() - 1];
-		let inner_type = parse_field_type(inner)?;
-		return Ok(FieldType::List(Box::new(inner_type)));
-	}
+    // List<T>
+    if type_str.starts_with("List<") && type_str.ends_with('>') {
+        let inner = &type_str[5..type_str.len() - 1];
+        let inner_type = parse_field_type(inner)?;
+        return Ok(FieldType::List(Box::new(inner_type)));
+    }
 
-	// Map<T>
-	if type_str.starts_with("Map<") && type_str.ends_with('>') {
-		let inner = &type_str[4..type_str.len() - 1];
-		let inner_type = parse_field_type(inner)?;
-		return Ok(FieldType::Map(Box::new(inner_type)));
-	}
+    // Map<T>
+    if type_str.starts_with("Map<") && type_str.ends_with('>') {
+        let inner = &type_str[4..type_str.len() - 1];
+        let inner_type = parse_field_type(inner)?;
+        return Ok(FieldType::Map(Box::new(inner_type)));
+    }
 
-	// Primitive types
-	match type_str {
-		"Bool" | "Boolean" => Ok(FieldType::Bool),
-		"String" => Ok(FieldType::String),
-		"Number" | "Float" | "f64" => Ok(FieldType::Number),
-		// Type reference
-		_ => Ok(FieldType::TypeRef(type_str.into())),
-	}
+    // Primitive types
+    match type_str {
+        "Bool" | "Boolean" => Ok(FieldType::Bool),
+        "String" => Ok(FieldType::String),
+        "Number" | "Float" | "f64" => Ok(FieldType::Number),
+        // Type reference
+        _ => Ok(FieldType::TypeRef(type_str.into())),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn test_parse_simple_schema() {
-		let schema_text = r#"
+    #[test]
+    fn test_parse_simple_schema() {
+        let schema_text = r#"
 type Lead {
     vertical: String
     score: Number
 }
 		"#;
 
-		let schema = parse_schema(schema_text).expect("parse failed");
-		assert_eq!(schema.types.len(), 1);
+        let schema = parse_schema(schema_text).expect("parse failed");
+        assert_eq!(schema.types.len(), 1);
 
-		let lead_type = schema.get_type("Lead").expect("Lead type not found");
-		assert_eq!(lead_type.fields.len(), 2);
-		assert_eq!(lead_type.fields[0].name.as_ref(), "vertical");
-		assert_eq!(lead_type.fields[1].name.as_ref(), "score");
-	}
+        let lead_type = schema.get_type("Lead").expect("Lead type not found");
+        assert_eq!(lead_type.fields.len(), 2);
+        assert_eq!(lead_type.fields[0].name.as_ref(), "vertical");
+        assert_eq!(lead_type.fields[1].name.as_ref(), "score");
+    }
 
-	#[test]
-	fn test_parse_schema_with_lists() {
-		let schema_text = r#"
+    #[test]
+    fn test_parse_schema_with_lists() {
+        let schema_text = r#"
 type Contact {
     email: String
 }
@@ -311,59 +314,59 @@ type Lead {
 }
 		"#;
 
-		let schema = parse_schema(schema_text).expect("parse failed");
-		assert_eq!(schema.types.len(), 2);
+        let schema = parse_schema(schema_text).expect("parse failed");
+        assert_eq!(schema.types.len(), 2);
 
-		let lead_type = schema.get_type("Lead").expect("Lead type not found");
-		assert_eq!(lead_type.fields.len(), 1);
+        let lead_type = schema.get_type("Lead").expect("Lead type not found");
+        assert_eq!(lead_type.fields.len(), 1);
 
-		match &lead_type.fields[0].field_type {
-			FieldType::List(inner) => match inner.as_ref() {
-				FieldType::TypeRef(name) => assert_eq!(name.as_ref(), "Contact"),
-				_ => panic!("Expected TypeRef"),
-			},
-			_ => panic!("Expected List type"),
-		}
-	}
+        match &lead_type.fields[0].field_type {
+            FieldType::List(inner) => match inner.as_ref() {
+                FieldType::TypeRef(name) => assert_eq!(name.as_ref(), "Contact"),
+                _ => panic!("Expected TypeRef"),
+            },
+            _ => panic!("Expected List type"),
+        }
+    }
 
-	#[test]
-	fn test_parse_schema_with_optional() {
-		let schema_text = r#"
+    #[test]
+    fn test_parse_schema_with_optional() {
+        let schema_text = r#"
 type Lead {
     email: String
     phone?: String
 }
 		"#;
 
-		let schema = parse_schema(schema_text).expect("parse failed");
-		let lead_type = schema.get_type("Lead").expect("Lead type not found");
+        let schema = parse_schema(schema_text).expect("parse failed");
+        let lead_type = schema.get_type("Lead").expect("Lead type not found");
 
-		assert!(!lead_type.fields[0].optional);
-		assert!(lead_type.fields[1].optional);
-	}
+        assert!(!lead_type.fields[0].optional);
+        assert!(lead_type.fields[1].optional);
+    }
 
-	#[test]
-	fn test_schema_validation() {
-		let schema_text = r#"
+    #[test]
+    fn test_schema_validation() {
+        let schema_text = r#"
 type Lead {
     contact: UnknownType
 }
 		"#;
 
-		let result = parse_schema(schema_text);
-		assert!(result.is_err());
-		assert!(result.unwrap_err().contains("Undefined type reference"));
-	}
+        let result = parse_schema(schema_text);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Undefined type reference"));
+    }
 }
 
 // Additional integration tests
 #[cfg(test)]
 mod integration_tests {
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn test_parse_binary_schema() {
-		let schema_text = r#"
+    #[test]
+    fn test_parse_binary_schema() {
+        let schema_text = r#"
 type Binary {
     format: String
     arch: String
@@ -382,19 +385,19 @@ type Import {
 }
 "#;
 
-		let schema = parse_schema(schema_text).expect("Failed to parse binary schema");
-		assert!(schema.get_type("Binary").is_some());
-		assert!(schema.get_type("Security").is_some());
-		assert!(schema.get_type("Import").is_some());
+        let schema = parse_schema(schema_text).expect("Failed to parse binary schema");
+        assert!(schema.get_type("Binary").is_some());
+        assert!(schema.get_type("Security").is_some());
+        assert!(schema.get_type("Import").is_some());
 
-		let import_type = schema.get_type("Import").unwrap();
-		assert_eq!(import_type.fields.len(), 2);
-		assert!(import_type.fields[1].optional); // library is optional
-	}
+        let import_type = schema.get_type("Import").unwrap();
+        assert_eq!(import_type.fields.len(), 2);
+        assert!(import_type.fields[1].optional); // library is optional
+    }
 
-	#[test]
-	fn test_parse_crm_schema() {
-		let schema_text = r#"
+    #[test]
+    fn test_parse_crm_schema() {
+        let schema_text = r#"
 type Lead {
     vertical: String
     score: Number
@@ -413,19 +416,19 @@ type Enrichment {
 }
 "#;
 
-		let schema = parse_schema(schema_text).expect("Failed to parse CRM schema");
-		assert!(schema.get_type("Lead").is_some());
-		assert!(schema.get_type("Contact").is_some());
-		assert!(schema.get_type("Enrichment").is_some());
+        let schema = parse_schema(schema_text).expect("Failed to parse CRM schema");
+        assert!(schema.get_type("Lead").is_some());
+        assert!(schema.get_type("Contact").is_some());
+        assert!(schema.get_type("Enrichment").is_some());
 
-		let lead_type = schema.get_type("Lead").unwrap();
-		// Verify contacts field is List<Contact>
-		match &lead_type.fields[2].field_type {
-			FieldType::List(inner) => match inner.as_ref() {
-				FieldType::TypeRef(name) => assert_eq!(name.as_ref(), "Contact"),
-				_ => panic!("Expected TypeRef"),
-			},
-			_ => panic!("Expected List type"),
-		}
-	}
+        let lead_type = schema.get_type("Lead").unwrap();
+        // Verify contacts field is List<Contact>
+        match &lead_type.fields[2].field_type {
+            FieldType::List(inner) => match inner.as_ref() {
+                FieldType::TypeRef(name) => assert_eq!(name.as_ref(), "Contact"),
+                _ => panic!("Expected TypeRef"),
+            },
+            _ => panic!("Expected List type"),
+        }
+    }
 }

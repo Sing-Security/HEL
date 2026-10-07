@@ -56,12 +56,12 @@
 //! assert!(result2);
 //! ```
 
-use bumpalo::Bump;
 use bumpalo::collections::Vec as BumpVec;
+use bumpalo::Bump;
 
 use crate::{
-    Comparator, EvalError, FactsEvalContext, HelError, HelParser, HelResolver, Rule, Value,
-    builtins::BuiltinsRegistry,
+    builtins::BuiltinsRegistry, Comparator, EvalError, FactsEvalContext, HelError, HelParser,
+    HelResolver, Rule, Value,
 };
 use pest::Parser;
 
@@ -150,9 +150,7 @@ impl ArenaParser {
     /// Create a new arena parser
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            arena: Bump::new(),
-        }
+        Self { arena: Bump::new() }
     }
 
     /// Parse a HEL rule into an arena-allocated AST
@@ -222,10 +220,7 @@ impl ArenaParser {
     }
 
     /// Build an arena-allocated AST from a pest Pair
-    fn build_ast_arena<'a>(
-        &'a self,
-        pair: pest::iterators::Pair<Rule>,
-    ) -> &'a AstNode<'a> {
+    fn build_ast_arena<'a>(&'a self, pair: pest::iterators::Pair<Rule>) -> &'a AstNode<'a> {
         let node = match pair.as_rule() {
             Rule::top | Rule::condition => {
                 let mut inner = pair.into_inner();
@@ -236,7 +231,7 @@ impl ArenaParser {
             Rule::logical_and | Rule::logical_or => {
                 let is_and = pair.as_rule() == Rule::logical_and;
                 let mut nodes = BumpVec::new_in(&self.arena);
-                
+
                 for inner in pair.into_inner() {
                     match inner.as_rule() {
                         Rule::and_op | Rule::or_op => {}
@@ -314,7 +309,8 @@ impl ArenaParser {
                         let mut entry_inner = entry_pair.into_inner();
                         let key_pair = entry_inner.next().expect("Missing map key");
                         let key: &str = self.arena.alloc_str(key_pair.as_str().trim_matches('"'));
-                        let value = *self.build_ast_arena(entry_inner.next().expect("Missing map value"));
+                        let value =
+                            *self.build_ast_arena(entry_inner.next().expect("Missing map value"));
                         entries.push((key, value));
                     }
                 }
@@ -328,7 +324,8 @@ impl ArenaParser {
                 // A second identifier before the argument list means the call is namespaced
                 // (`ns.func(...)`); the grammar orders it first, so anything left after it is
                 // an argument.
-                let (namespace, name, remaining_args): (Option<&str>, &str, _) = match inner.next() {
+                let (namespace, name, remaining_args): (Option<&str>, &str, _) = match inner.next()
+                {
                     Some(second) => (
                         Some(self.arena.alloc_str(first.as_str())),
                         self.arena.alloc_str(second.as_str()),
@@ -544,9 +541,7 @@ fn evaluate_ast_arena<'arena>(
             }
             Ok(false)
         }
-        AstNode::Comparison { left, op, right } => {
-            evaluate_comparison_arena(left, *op, right, ctx)
-        }
+        AstNode::Comparison { left, op, right } => evaluate_comparison_arena(left, *op, right, ctx),
         other => {
             let value = eval_node_to_value_arena(other, ctx)?;
             match value {
@@ -576,8 +571,8 @@ fn eval_node_to_value_arena<'arena>(
     node: &AstNode<'arena>,
     ctx: &ArenaEvalContext,
 ) -> Result<Value, EvalError> {
-    use std::sync::Arc;
     use std::collections::BTreeMap;
+    use std::sync::Arc;
 
     match node {
         AstNode::Bool(b) => Ok(Value::Bool(*b)),
@@ -616,7 +611,11 @@ fn eval_node_to_value_arena<'arena>(
             let bool_result = evaluate_ast_arena(node, ctx)?;
             Ok(Value::Bool(bool_result))
         }
-        AstNode::FunctionCall { namespace, name, args } => {
+        AstNode::FunctionCall {
+            namespace,
+            name,
+            args,
+        } => {
             let arg_values: Result<Vec<Value>, EvalError> = args
                 .iter()
                 .map(|arg| eval_node_to_value_arena(arg, ctx))
@@ -651,7 +650,7 @@ mod tests {
     fn test_arena_parse_simple_boolean() {
         let parser = ArenaParser::new();
         let ast = parser.parse_rule("true");
-        
+
         // The grammar always wraps in Or([And([...])])
         match ast {
             AstNode::Or(ors) => {
@@ -672,7 +671,7 @@ mod tests {
     fn test_arena_parse_comparison() {
         let parser = ArenaParser::new();
         let ast = parser.parse_rule(r#"x == 10"#);
-        
+
         // The grammar always wraps in Or([And([...])])
         match ast {
             AstNode::Or(ors) => {
@@ -700,7 +699,7 @@ mod tests {
     fn test_arena_parse_and_expression() {
         let parser = ArenaParser::new();
         let ast = parser.parse_rule("true AND false");
-        
+
         // The grammar always wraps in Or([And([...])])
         match ast {
             AstNode::Or(ors) => {
@@ -722,7 +721,7 @@ mod tests {
     fn test_arena_parse_or_expression() {
         let parser = ArenaParser::new();
         let ast = parser.parse_rule("true OR false");
-        
+
         // For OR, it should wrap in Or with 2 And children
         match ast {
             AstNode::Or(ors) => {
@@ -751,7 +750,7 @@ mod tests {
     fn test_arena_parse_list_literal() {
         let parser = ArenaParser::new();
         let ast = parser.parse_rule(r#"["a", "b", "c"]"#);
-        
+
         // The grammar wraps in Or([And([...])])
         match ast {
             AstNode::Or(ors) => {
@@ -777,7 +776,7 @@ mod tests {
     fn test_arena_parse_map_literal() {
         let parser = ArenaParser::new();
         let ast = parser.parse_rule(r#"{"key": "value"}"#);
-        
+
         // The grammar wraps in Or([And([...])])
         match ast {
             AstNode::Or(ors) => {
@@ -804,10 +803,10 @@ mod tests {
     fn test_arena_evaluate_simple_boolean() {
         let parser = ArenaParser::new();
         let ctx = FactsEvalContext::new();
-        
+
         let result = evaluate_arena("true", &ctx, &parser).expect("eval failed");
         assert!(result);
-        
+
         let result = evaluate_arena("false", &ctx, &parser).expect("eval failed");
         assert!(!result);
     }
@@ -816,10 +815,10 @@ mod tests {
     fn test_arena_evaluate_and() {
         let parser = ArenaParser::new();
         let ctx = FactsEvalContext::new();
-        
+
         let result = evaluate_arena("true AND true", &ctx, &parser).expect("eval failed");
         assert!(result);
-        
+
         let result = evaluate_arena("true AND false", &ctx, &parser).expect("eval failed");
         assert!(!result);
     }
@@ -828,10 +827,10 @@ mod tests {
     fn test_arena_evaluate_or() {
         let parser = ArenaParser::new();
         let ctx = FactsEvalContext::new();
-        
+
         let result = evaluate_arena("true OR false", &ctx, &parser).expect("eval failed");
         assert!(result);
-        
+
         let result = evaluate_arena("false OR false", &ctx, &parser).expect("eval failed");
         assert!(!result);
     }
@@ -842,17 +841,29 @@ mod tests {
         let mut ctx = FactsEvalContext::new();
         ctx.add_fact("vars.x", Value::Number(10.0));
         ctx.add_fact("vars.y", Value::Number(20.0));
-        
+
         let result = evaluate_arena(r#"vars.x == 10"#, &ctx, &parser);
-        assert!(result.is_ok(), "vars.x == 10 failed with error: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "vars.x == 10 failed with error: {:?}",
+            result.err()
+        );
         assert!(result.unwrap(), "vars.x == 10 should be true");
-        
+
         let result = evaluate_arena(r#"vars.x < vars.y"#, &ctx, &parser);
-        assert!(result.is_ok(), "vars.x < vars.y failed with error: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "vars.x < vars.y failed with error: {:?}",
+            result.err()
+        );
         assert!(result.unwrap(), "vars.x < vars.y should be true");
-        
+
         let result = evaluate_arena(r#"vars.x > vars.y"#, &ctx, &parser);
-        assert!(result.is_ok(), "vars.x > vars.y failed with error: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "vars.x > vars.y failed with error: {:?}",
+            result.err()
+        );
         assert!(!result.unwrap(), "vars.x > vars.y should be false");
     }
 
@@ -863,11 +874,11 @@ mod tests {
         ctx.add_fact("vars.x", Value::Number(10.0));
         ctx.add_fact("vars.y", Value::Number(20.0));
         ctx.add_fact("vars.z", Value::Number(30.0));
-        
+
         let expr = r#"(vars.x < vars.y) AND (vars.y < vars.z)"#;
         let result = evaluate_arena(expr, &ctx, &parser).expect("eval failed");
         assert!(result);
-        
+
         let expr = r#"(vars.x > vars.y) OR (vars.y < vars.z)"#;
         let result = evaluate_arena(expr, &ctx, &parser).expect("eval failed");
         assert!(result);
@@ -878,14 +889,14 @@ mod tests {
         let mut parser = ArenaParser::new();
         let mut ctx = FactsEvalContext::new();
         ctx.add_fact("vars.x", Value::Number(10.0));
-        
+
         // First parse and evaluate
         let result1 = evaluate_arena(r#"vars.x == 10"#, &ctx, &parser).expect("eval failed");
         assert!(result1);
-        
+
         // Reset arena
         parser.reset();
-        
+
         // Second parse and evaluate
         let result2 = evaluate_arena(r#"vars.x > 5"#, &ctx, &parser).expect("eval failed");
         assert!(result2);
@@ -896,10 +907,10 @@ mod tests {
         let parser = ArenaParser::new();
         let mut ctx = FactsEvalContext::new();
         ctx.add_fact("user.name", Value::String(Arc::from("Alice")));
-        
+
         let result = evaluate_arena(r#"user.name == "Alice""#, &ctx, &parser).expect("eval failed");
         assert!(result);
-        
+
         let result = evaluate_arena(r#"user.name != "Bob""#, &ctx, &parser).expect("eval failed");
         assert!(result);
     }
@@ -908,16 +919,21 @@ mod tests {
     fn test_arena_list_contains() {
         let parser = ArenaParser::new();
         let mut ctx = FactsEvalContext::new();
-        ctx.add_fact("data.items", Value::List(vec![
-            Value::String(Arc::from("a")),
-            Value::String(Arc::from("b")),
-            Value::String(Arc::from("c")),
-        ]));
-        
-        let result = evaluate_arena(r#"data.items CONTAINS "b""#, &ctx, &parser).expect("eval failed");
+        ctx.add_fact(
+            "data.items",
+            Value::List(vec![
+                Value::String(Arc::from("a")),
+                Value::String(Arc::from("b")),
+                Value::String(Arc::from("c")),
+            ]),
+        );
+
+        let result =
+            evaluate_arena(r#"data.items CONTAINS "b""#, &ctx, &parser).expect("eval failed");
         assert!(result);
-        
-        let result = evaluate_arena(r#"data.items CONTAINS "d""#, &ctx, &parser).expect("eval failed");
+
+        let result =
+            evaluate_arena(r#"data.items CONTAINS "d""#, &ctx, &parser).expect("eval failed");
         assert!(!result);
     }
 
@@ -926,11 +942,13 @@ mod tests {
         let parser = ArenaParser::new();
         let mut ctx = FactsEvalContext::new();
         ctx.add_fact("data.x", Value::String(Arc::from("b")));
-        
-        let result = evaluate_arena(r#"data.x IN ["a", "b", "c"]"#, &ctx, &parser).expect("eval failed");
+
+        let result =
+            evaluate_arena(r#"data.x IN ["a", "b", "c"]"#, &ctx, &parser).expect("eval failed");
         assert!(result);
-        
-        let result = evaluate_arena(r#"data.x IN ["d", "e", "f"]"#, &ctx, &parser).expect("eval failed");
+
+        let result =
+            evaluate_arena(r#"data.x IN ["d", "e", "f"]"#, &ctx, &parser).expect("eval failed");
         assert!(!result);
     }
 
@@ -941,12 +959,15 @@ mod tests {
         let mut ctx = FactsEvalContext::new();
         ctx.add_fact("vars.x", Value::Number(42.0));
         ctx.add_fact("data.y", Value::String(Arc::from("test")));
-        ctx.add_fact("list.items", Value::List(vec![
-            Value::Number(1.0),
-            Value::Number(2.0),
-            Value::Number(3.0),
-        ]));
-        
+        ctx.add_fact(
+            "list.items",
+            Value::List(vec![
+                Value::Number(1.0),
+                Value::Number(2.0),
+                Value::Number(3.0),
+            ]),
+        );
+
         let test_cases = vec![
             r#"vars.x == 42"#,
             r#"vars.x > 40 AND vars.x < 50"#,
@@ -954,13 +975,13 @@ mod tests {
             r#"list.items CONTAINS 2"#,
             r#"(vars.x > 40) OR (data.y != "test")"#,
         ];
-        
+
         for expr in test_cases {
             let arena_result = evaluate_arena(expr, &ctx, &arena_parser)
                 .unwrap_or_else(|e| panic!("arena eval failed for {}: {}", expr, e));
             let heap_result = crate::evaluate(expr, &ctx)
                 .unwrap_or_else(|e| panic!("heap eval failed for {}: {}", expr, e));
-            
+
             assert_eq!(
                 arena_result, heap_result,
                 "Results differ for expression: {}",

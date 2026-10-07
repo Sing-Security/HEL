@@ -160,7 +160,6 @@
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
-
 // Include the README as crate documentation *only while doctests are being collected*.
 // That compiles and runs every `rust` block in README.md as part of `cargo test --doc`
 // without duplicating the README into the rendered API docs.
