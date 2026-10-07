@@ -1,19 +1,9 @@
-//! Arena-allocated AST for HEL
+//! Arena-allocated AST for HEL.
 //!
-//! This module provides an arena-based memory allocation strategy for HEL AST nodes.
-//! Arena allocation improves performance by:
-//!
-//! 1. **Fast allocation**: O(1) bump pointer allocation vs global allocator overhead
-//! 2. **Cache locality**: Nodes are adjacent in memory, improving CPU cache utilization
-//! 3. **Batch deallocation**: Dropping the arena frees all nodes at once, no recursive Drop
-//!
-//! # When to use arena allocation
-//!
-//! Arena allocation is particularly beneficial when:
-//!
-//! - Parsing and evaluating many expressions in a tight loop (e.g., rule engines)
-//! - Expression lifetime is known and bounded (e.g., single request processing)
-//! - Memory pressure from many small heap allocations is a concern
+//! Nodes are bump-allocated into one arena and referenced as `&'arena`, so a parse costs a
+//! pointer bump instead of one heap allocation per node, the nodes sit adjacent in memory, and
+//! [`reset`](ArenaParser::reset) frees the lot in one step. This pays off when many expressions
+//! go through one reused parser; a single one-off parse does not need it.
 //!
 //! # Example
 //!
@@ -32,8 +22,7 @@
 //!
 //! # Arena reuse
 //!
-//! For maximum performance when processing multiple expressions, reuse the same
-//! `ArenaParser` instance and call `reset()` between expressions:
+//! Reuse one `ArenaParser` across expressions, calling `reset()` between them:
 //!
 //! ```
 //! use hel::arena::{ArenaParser, evaluate_arena};
@@ -44,14 +33,11 @@
 //!
 //! let mut parser = ArenaParser::new();
 //!
-//! // Parse and evaluate first expression
 //! let result1 = evaluate_arena(r#"vars.x == 10"#, &ctx, &parser).expect("eval failed");
 //! assert!(result1);
 //!
-//! // Reset arena to reuse memory
 //! parser.reset();
 //!
-//! // Parse and evaluate second expression
 //! let result2 = evaluate_arena(r#"vars.x > 5"#, &ctx, &parser).expect("eval failed");
 //! assert!(result2);
 //! ```
@@ -69,12 +55,9 @@ use pest::Parser;
 // Arena AST Types
 // ============================================================================
 
-/// An arena-allocated AST node
-///
-/// Uses references into the arena (`&'arena`) instead of `Box` / `Vec` / `Arc`.
-/// This eliminates individual heap allocations and improves cache locality.
-///
-/// The `'arena` lifetime ties all nodes to their arena — no use-after-free possible.
+/// An arena-allocated AST node — the counterpart of [`hel::AstNode`](crate::AstNode), with
+/// children as arena references (`&'arena`) rather than `Box` / `Vec` / `Arc`. The `'arena`
+/// lifetime ties every node to its arena, so a node cannot outlive the memory it points into.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum AstNode<'arena> {
@@ -127,11 +110,7 @@ pub enum AstNode<'arena> {
 // Arena Parser
 // ============================================================================
 
-/// Parser that builds arena-allocated ASTs
-///
-/// This parser allocates all AST nodes into a single contiguous memory region
-/// (the arena). This improves parse speed and memory locality compared to
-/// individual heap allocations.
+/// Parser that builds arena-allocated ASTs into the arena it owns.
 ///
 /// # Example
 ///
@@ -203,18 +182,16 @@ impl ArenaParser {
         Ok(self.parse_rule(expr))
     }
 
-    /// Reset the arena for reuse
+    /// Reset the arena for reuse.
     ///
-    /// Frees every allocation in one step and makes the memory available to subsequent
-    /// parses, which is cheaper than dropping the parser and building a new one.
+    /// Frees every allocation in one step and makes the memory available to later parses,
+    /// which is cheaper than dropping the parser and building a new one.
     ///
     /// # Warning
     ///
-    /// Every AST node previously returned by this parser is invalidated by the reset.
-    /// The borrow checker enforces this: `reset` takes `&mut self` while a returned node
-    /// holds `&self`, so a node that is still alive cannot coexist with a reset. The
-    /// hazard is purely a runtime one the type system already prevents — there is no way
-    /// to hold a stale node across a call to this method in safe code.
+    /// Every AST node previously returned by this parser is invalidated. The borrow checker
+    /// enforces this — `reset` takes `&mut self` while a live node holds `&self` — so safe code
+    /// cannot carry a node across this call.
     pub fn reset(&mut self) {
         self.arena.reset();
     }
@@ -890,14 +867,11 @@ mod tests {
         let mut ctx = FactsEvalContext::new();
         ctx.add_fact("vars.x", Value::Number(10.0));
 
-        // First parse and evaluate
         let result1 = evaluate_arena(r#"vars.x == 10"#, &ctx, &parser).expect("eval failed");
         assert!(result1);
 
-        // Reset arena
         parser.reset();
 
-        // Second parse and evaluate
         let result2 = evaluate_arena(r#"vars.x > 5"#, &ctx, &parser).expect("eval failed");
         assert!(result2);
     }
@@ -954,7 +928,7 @@ mod tests {
 
     #[test]
     fn test_arena_heap_equivalence() {
-        // Test that arena and heap parsers produce equivalent evaluation results
+        // Arena and heap parsers must agree on the result.
         let arena_parser = ArenaParser::new();
         let mut ctx = FactsEvalContext::new();
         ctx.add_fact("vars.x", Value::Number(42.0));

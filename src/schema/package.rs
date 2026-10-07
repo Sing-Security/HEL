@@ -1,18 +1,12 @@
-//! Package system for HEL domain schemas
+//! Packages of HEL domain schemas.
 //!
-//! This module implements a package-based schema system that allows domains
-//! to define versioned schema packages with dependencies and imports.
+//! A package is a directory with a `hel-package.toml` manifest naming its schema files, its
+//! version and its dependencies. [`PackageRegistry`] loads packages from search paths, resolves
+//! their dependencies, and merges their types into one environment with every type qualified by
+//! its package name (`security-binary.Binary`), so two packages may define the same short name.
 //!
-//! ## Architecture
-//! - Packages are defined by `hel-package.toml` manifests
-//! - Schemas can import other packages, creating namespaced types
-//! - A PackageRegistry loads and resolves package dependencies
-//! - Type names are qualified to avoid collisions (e.g., security-binary.Binary)
-//!
-//! ## Determinism
-//! - All package loading uses stable ordering (BTreeMap)
-//! - Dependency resolution is deterministic
-//! - Error messages include package/file/line context
+//! Loading and resolution iterate `BTreeMap`s, so the order of packages, types and error
+//! messages is the same run to run.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -530,7 +524,6 @@ fn extract_imports(content: &str) -> Vec<String> {
     for line in content.lines() {
         let line = line.trim();
         if line.starts_with("import ") {
-            // Parse: import "package-name";
             if let Some(rest) = line.strip_prefix("import ") {
                 let rest = rest.trim().trim_end_matches(';').trim();
                 if let Some(name) = rest.strip_prefix('"') {
@@ -558,7 +551,6 @@ mod tests {
     fn create_test_package(dir: &Path, name: &str, deps: &[(&str, &str)]) -> std::io::Result<()> {
         fs::create_dir_all(dir.join("schema"))?;
 
-        // Create manifest
         let mut manifest = format!(
             r#"
 name = "{}"
@@ -577,7 +569,6 @@ schemas = ["schema/00_domain.hel"]
 
         fs::write(dir.join("hel-package.toml"), manifest)?;
 
-        // Create simple schema
         let schema = format!(
             r#"
 type {}Type {{
@@ -658,11 +649,9 @@ type MyType {
     fn test_dependency_resolution() -> Result<(), Box<dyn std::error::Error>> {
         let temp = TempDir::new()?;
 
-        // Create base package
         let base_dir = temp.path().join("base-pkg");
         create_test_package(&base_dir, "base-pkg", &[])?;
 
-        // Create dependent package
         let dep_dir = temp.path().join("dep-pkg");
         create_test_package(&dep_dir, "dep-pkg", &[("base-pkg", "0.1.0")])?;
 
@@ -699,11 +688,10 @@ type MyType {
     fn test_circular_dependency_detection() -> Result<(), Box<dyn std::error::Error>> {
         let temp = TempDir::new()?;
 
-        // Create pkg-a depending on pkg-b
+        // Mutually dependent: pkg-a -> pkg-b -> pkg-a
         let a_dir = temp.path().join("pkg-a");
         create_test_package(&a_dir, "pkg-a", &[("pkg-b", "0.1.0")])?;
 
-        // Create pkg-b depending on pkg-a (circular!)
         let b_dir = temp.path().join("pkg-b");
         create_test_package(&b_dir, "pkg-b", &[("pkg-a", "0.1.0")])?;
 

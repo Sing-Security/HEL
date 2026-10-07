@@ -17,11 +17,9 @@
 //!
 //! ## Purity
 //!
-//! A built-in must be pure and deterministic: it sees only its arguments and must not read
-//! the clock, the filesystem or global mutable state. The evaluator takes the
-//! [`BuiltinFn`] out from behind a shared reference and calls it from whatever thread
-//! happens to be evaluating, so a non-pure built-in would make results depend on timing
-//! and would undermine the audit traces this crate exists to produce.
+//! A built-in must be pure and deterministic: it sees only its arguments, and must not read the
+//! clock, the filesystem or global mutable state. The evaluator calls it from whatever thread
+//! happens to be evaluating, so anything else would make results depend on timing.
 //!
 //! The registry itself is a `BTreeMap`, so iteration order — and therefore
 //! [`BuiltinsRegistry::namespaces`] and [`BuiltinsRegistry::functions_in_namespace`] — is
@@ -151,9 +149,8 @@ impl BuiltinsRegistry {
     /// # Errors
     ///
     /// Returns `Err` naming the namespace if a provider for it is already registered.
-    /// Registration never merges or overwrites an existing namespace, and there is no
-    /// removal method — so an accidental double-registration fails loudly rather than
-    /// silently shadowing the original functions.
+    /// Registration never merges or overwrites an existing namespace, and there is no removal
+    /// method.
     pub fn register(&mut self, provider: &dyn BuiltinsProvider) -> Result<(), String> {
         let namespace = provider.namespace().to_lowercase();
 
@@ -241,9 +238,9 @@ impl BuiltinsRegistry {
 
 /// The `core.*` functions: `len`, `contains`, `upper` and `lower`.
 ///
-/// These are the operations on lists and strings that carry no knowledge of any particular
-/// kind of data, which is why they ship with the crate. Anything that does know about a
-/// domain belongs in the host's own [`BuiltinsProvider`], under its own namespace.
+/// Operations on lists and strings that carry no knowledge of any particular kind of data.
+/// Anything that does know about a domain belongs in the host's own [`BuiltinsProvider`], under
+/// its own namespace.
 ///
 /// | Call | Behaviour |
 /// |---|---|
@@ -282,7 +279,7 @@ impl BuiltinsProvider for CoreBuiltinsProvider {
     fn get_builtins(&self) -> BTreeMap<String, BuiltinFn> {
         let mut builtins = BTreeMap::new();
 
-        // core.len(list) - get length of list
+        // core.len(list)
         builtins.insert(
             "len".to_string(),
             Arc::new(|args: &[Value]| -> Result<Value, EvalError> {
@@ -304,7 +301,7 @@ impl BuiltinsProvider for CoreBuiltinsProvider {
             }) as BuiltinFn,
         );
 
-        // core.contains(list, value) - check if list contains value
+        // core.contains(list, value)
         builtins.insert(
             "contains".to_string(),
             Arc::new(|args: &[Value]| -> Result<Value, EvalError> {
@@ -337,7 +334,7 @@ impl BuiltinsProvider for CoreBuiltinsProvider {
             }) as BuiltinFn,
         );
 
-        // core.upper(string) - convert to uppercase
+        // core.upper(string)
         builtins.insert(
             "upper".to_string(),
             Arc::new(|args: &[Value]| -> Result<Value, EvalError> {
@@ -358,7 +355,7 @@ impl BuiltinsProvider for CoreBuiltinsProvider {
             }) as BuiltinFn,
         );
 
-        // core.lower(string) - convert to lowercase
+        // core.lower(string)
         builtins.insert(
             "lower".to_string(),
             Arc::new(|args: &[Value]| -> Result<Value, EvalError> {
@@ -398,12 +395,10 @@ mod tests {
 
         let len_fn = builtins.get("len").expect("len function not found");
 
-        // Test with list
         let result = len_fn(&[Value::List(vec![Value::Number(1.0), Value::Number(2.0)])])
             .expect("len failed");
         assert_eq!(result, Value::Number(2.0));
 
-        // Test with string
         let result = len_fn(&[Value::String("hello".into())]).expect("len failed");
         assert_eq!(result, Value::Number(5.0));
     }
@@ -417,12 +412,10 @@ mod tests {
             .get("contains")
             .expect("contains function not found");
 
-        // Test list contains
         let list = Value::List(vec![Value::String("a".into()), Value::String("b".into())]);
         let result = contains_fn(&[list, Value::String("a".into())]).expect("contains failed");
         assert_eq!(result, Value::Bool(true));
 
-        // Test string contains
         let result = contains_fn(&[Value::String("hello".into()), Value::String("ell".into())])
             .expect("contains failed");
         assert_eq!(result, Value::Bool(true));
@@ -447,21 +440,17 @@ mod tests {
     fn test_builtins_registry() {
         let mut registry = BuiltinsRegistry::new();
 
-        // Register core provider
         let provider = CoreBuiltinsProvider;
         registry.register(&provider).expect("registration failed");
 
-        // Test function call
         let result = registry
             .call("core", "len", &[Value::List(vec![Value::Number(1.0)])])
             .expect("call failed");
         assert_eq!(result, Value::Number(1.0));
 
-        // Test namespace listing
         let namespaces = registry.namespaces();
         assert_eq!(namespaces, vec!["core"]);
 
-        // Test function listing
         let functions = registry
             .functions_in_namespace("core")
             .expect("functions not found");

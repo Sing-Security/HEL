@@ -1,12 +1,9 @@
-//! Integration tests for HEL script evaluation with let bindings
-//!
-//! These tests demonstrate end-to-end script evaluation workflows.
+//! Scripts end-to-end: `let` bindings, comments, and multi-line conditions.
 
 use hel::{evaluate_script, parse_script, FactsEvalContext, Value};
 
 #[test]
 fn test_android_malware_detection_script() {
-    // Simulate Android app analysis
     let mut ctx = FactsEvalContext::new();
 
     // Binary characteristics
@@ -111,7 +108,7 @@ fn test_network_behavior_analysis() {
 
 #[test]
 fn test_script_validation_catches_errors() {
-    // Truly incomplete expression - missing closing parenthesis
+    // Unclosed parenthesis: not a complete expression.
     let invalid_script = r#"
         let has_perms = (binary.format == "ELF"
         has_perms
@@ -230,7 +227,6 @@ fn test_script_with_comments_only() {
 
 #[test]
 fn test_script_parsing_validation() {
-    // Valid script should parse
     let valid = r#"
         let x = true
         x

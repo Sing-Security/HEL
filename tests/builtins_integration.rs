@@ -1,6 +1,4 @@
-//! Integration tests for HEL built-ins
-//!
-//! These tests demonstrate using built-in functions in HEL expressions.
+//! Built-in functions driven end-to-end through the evaluator.
 
 use hel::{
     evaluate_with_context, BuiltinsProvider, BuiltinsRegistry, CoreBuiltinsProvider, HelResolver,
@@ -9,7 +7,7 @@ use hel::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-// Empty resolver for tests that only use literals and function calls
+// Answers nothing — these tests use only literals and function calls.
 struct EmptyResolver;
 impl HelResolver for EmptyResolver {
     fn resolve_attr(&self, _object: &str, _field: &str) -> Option<Value> {
@@ -24,7 +22,6 @@ fn test_core_len_function_call() {
     let provider = CoreBuiltinsProvider;
     registry.register(&provider).expect("registration failed");
 
-    // Test: core.len(["a", "b", "c"]) == 3
     let condition = r#"core.len(["a", "b", "c"]) == 3"#;
     let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
     assert!(result, "core.len should return 3 for list of 3 elements");
@@ -37,12 +34,10 @@ fn test_core_contains_function_call() {
     let provider = CoreBuiltinsProvider;
     registry.register(&provider).expect("registration failed");
 
-    // Test: core.contains(["a", "b", "c"], "b") == true
     let condition = r#"core.contains(["a", "b", "c"], "b") == true"#;
     let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
     assert!(result, "core.contains should find 'b' in list");
 
-    // Test: core.contains(["a", "b", "c"], "d") == false
     let condition = r#"core.contains(["a", "b", "c"], "d") == false"#;
     let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
     assert!(result, "core.contains should not find 'd' in list");
@@ -55,12 +50,10 @@ fn test_core_upper_lower_function_calls() {
     let provider = CoreBuiltinsProvider;
     registry.register(&provider).expect("registration failed");
 
-    // Test: core.upper("hello") == "HELLO"
     let condition = r#"core.upper("hello") == "HELLO""#;
     let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
     assert!(result, "core.upper should convert to uppercase");
 
-    // Test: core.lower("WORLD") == "world"
     let condition = r#"core.lower("WORLD") == "world""#;
     let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
     assert!(result, "core.lower should convert to lowercase");
@@ -79,7 +72,6 @@ fn test_custom_domain_builtin() {
         }
     }
 
-    // Custom built-in provider for security domain
     struct SecurityBuiltinsProvider;
     impl BuiltinsProvider for SecurityBuiltinsProvider {
         fn namespace(&self) -> &str {
@@ -122,12 +114,10 @@ fn test_custom_domain_builtin() {
         .register(&security)
         .expect("security registration failed");
 
-    // Test: security.is_dangerous(binary.format) == false (ELF is not dangerous)
     let condition = r#"security.is_dangerous(binary.format) == false"#;
     let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
     assert!(result, "ELF format should not be marked as dangerous");
 
-    // Test: security.is_dangerous("EXE") == true
     let condition = r#"security.is_dangerous("EXE") == true"#;
     let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
     assert!(result, "EXE format should be marked as dangerous");
@@ -140,17 +130,15 @@ fn test_function_call_in_complex_expression() {
     let provider = CoreBuiltinsProvider;
     registry.register(&provider).expect("registration failed");
 
-    // AND of two calls
     let condition = r#"core.len(["a", "b"]) == 2 AND core.contains(["x", "y", "z"], "y") == true"#;
     let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
     assert!(result, "AND of two function calls should be true");
 
-    // The false half of an AND of calls
+    // One false operand is enough to fail the AND.
     let condition = r#"core.len(["a", "b"]) == 2 AND core.contains(["x"], "y") == true"#;
     let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
     assert!(!result, "AND with a false call should be false");
 
-    // OR of two calls
     let condition = r#"core.len(["a"]) == 5 OR core.upper("test") == "TEST""#;
     let result = evaluate_with_context(condition, &resolver, &registry).expect("evaluation failed");
     assert!(result, "OR expression should work with function calls");

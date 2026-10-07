@@ -1,8 +1,7 @@
-//! Schema definition support for HEL
+//! Schema definition support for HEL.
 //!
-//! This module provides declarative schema definitions for domain types,
-//! allowing products to define their data models in .hel schema files
-//! instead of implementing resolvers in Rust code.
+//! Declarative definitions of a domain's types: a product declares its data model in `.hel`
+//! schema files instead of implementing a resolver in Rust.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -124,8 +123,7 @@ impl Default for Schema {
 
 /// Parse a schema from HEL schema syntax
 ///
-/// The syntax is deliberately simpler than the expression language, and is read line by
-/// line:
+/// The syntax is simpler than the expression language and is read line by line:
 ///
 /// ```hel
 /// type Lead {

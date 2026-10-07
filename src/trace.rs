@@ -1,7 +1,7 @@
-//! Trace capture for HEL rule evaluation
+//! Trace capture for HEL rule evaluation.
 //!
-//! This module provides evaluation tracing to explain why a rule matched or didn't match.
-//! It captures atom-level comparisons with resolved values for deterministic audit trails.
+//! Records per-atom comparisons with their resolved values, so a rule's match or non-match can
+//! be explained after the fact.
 
 use std::fmt;
 
@@ -294,10 +294,9 @@ impl fmt::Display for EvalTrace {
 }
 
 impl EvalTrace {
-    /// Return a human-friendly, deterministic multi-line string of the trace.
+    /// A human-readable, deterministic multi-line rendering of the trace.
     ///
-    /// Equivalent to `self.to_string()`; provided as a named method so call sites read
-    /// as an intent rather than a conversion.
+    /// Equivalent to `self.to_string()`.
     ///
     /// # Examples
     ///

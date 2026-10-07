@@ -7,6 +7,10 @@ authors = ["Your Name <you@example.com>"]
 license = "Apache-2.0"
 publish = false
 
+[features]
+# Attach the closed builtins-provider template; see `src/main.rs`.
+acme_provider = []
+
 [dependencies]
 # Local path to the hel crate in this workspace. Adjust if you move the example.
 hel = { path = "../.." }

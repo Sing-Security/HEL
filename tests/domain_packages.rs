@@ -1,7 +1,5 @@
-//! Integration tests for HEL domain packages
-//!
-//! These tests are self-contained: they create temporary packages on disk,
-//! add the temp directory as a search path, and then load and validate them.
+//! Package loading and resolution over real directories on disk: each test writes its own
+//! packages into a temp dir, adds it as a search path, and loads from there.
 
 use hel::PackageRegistry;
 use std::fs;
@@ -15,7 +13,6 @@ fn write_package(dir: &Path, name: &str, version: &str, schemas: &[(&str, &str)]
     let pkg_dir = dir.join(name);
     fs::create_dir_all(&pkg_dir).expect("failed to create package directory");
 
-    // Ensure schema subdirectories exist
     for (rel_path, _) in schemas {
         if let Some(parent) = Path::new(rel_path).parent() {
             fs::create_dir_all(pkg_dir.join(parent)).expect("failed to create schema parent dirs");
@@ -123,7 +120,6 @@ fn test_load_security_binary_package() {
     assert_eq!(package.manifest.name, "security-binary");
     assert_eq!(package.manifest.version, "0.1.0");
 
-    // Check that types are loaded
     assert!(package.schema.get_type("Binary").is_some());
     assert!(package.schema.get_type("Security").is_some());
     assert!(package.schema.get_type("Section").is_some());
@@ -145,7 +141,6 @@ fn test_load_sales_crm_package() {
     assert_eq!(package.manifest.name, "sales-crm");
     assert_eq!(package.manifest.version, "0.1.0");
 
-    // Check that types are loaded
     assert!(package.schema.get_type("Lead").is_some());
     assert!(package.schema.get_type("Contact").is_some());
     assert!(package.schema.get_type("Enrichment").is_some());
@@ -158,7 +153,6 @@ fn test_build_type_environment_with_multiple_packages() {
     let mut registry = PackageRegistry::new();
     registry.add_search_path(domains_dir);
 
-    // Load both packages
     registry
         .load_package("security-binary")
         .expect("Failed to load security-binary");
@@ -166,12 +160,10 @@ fn test_build_type_environment_with_multiple_packages() {
         .load_package("sales-crm")
         .expect("Failed to load sales-crm");
 
-    // Build type environment
     let env = registry
         .build_type_environment(&["security-binary".to_string(), "sales-crm".to_string()])
         .expect("Failed to build type environment");
 
-    // Check qualified type names
     assert!(env.get_type("security-binary.Binary").is_some());
     assert!(env.get_type("security-binary.Section").is_some());
     assert!(env.get_type("sales-crm.Lead").is_some());
@@ -188,13 +180,11 @@ fn test_package_namespace_separation() {
     let mut registry = PackageRegistry::new();
     registry.add_search_path(domains_dir);
 
-    // Load packages
     registry
         .load_package("security-binary")
         .expect("Failed to load");
     registry.load_package("sales-crm").expect("Failed to load");
 
-    // Get packages after loading
     let sec = registry
         .get_package("security-binary")
         .expect("Package not found");
@@ -202,16 +192,14 @@ fn test_package_namespace_separation() {
         .get_package("sales-crm")
         .expect("Package not found");
 
-    // Namespaces should match package names
     assert_eq!(sec.namespace(), "security-binary");
     assert_eq!(sales.namespace(), "sales-crm");
 
-    // Build environment and ensure no collisions
     let env = registry
         .build_type_environment(&["security-binary".to_string(), "sales-crm".to_string()])
         .expect("Failed to build environment");
 
-    // All types should be qualified
+    // Both packages' types are present under their qualified names.
     let type_count = env.types.len();
     assert!(type_count > 5, "Expected multiple types from both packages");
 }
