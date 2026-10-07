@@ -8,12 +8,15 @@ license = "Apache-2.0"
 publish = false
 
 [features]
-# Attach the closed builtins-provider template; see `src/main.rs`.
-acme_provider = []
+# Attach the closed builtins-provider template (`hel-template/`); see `src/main.rs`.
+acme_provider = ["dep:hel-closed-builtin-template"]
 
 [dependencies]
 # Local path to the hel crate in this workspace. Adjust if you move the example.
 hel = { path = "../.." }
+
+# Local-only, unpublished, and only pulled in by `acme_provider`.
+hel-closed-builtin-template = { path = "../../hel-template", optional = true }
 
 # Small convenience deps for examples/tests (optional)
 serde = { version = "1.0", features = ["derive"] }
