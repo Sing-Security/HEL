@@ -352,7 +352,7 @@ impl TypeEnvironment {
     /// Validate all type references in the environment
     ///
     /// Unlike [`Schema::validate`](super::Schema::validate), which runs inside a single
-    /// schema, this checks references against the merged, *qualified* namespace — a
+    /// schema, this checks references against the merged, *qualified* namespace - a
     /// reference must be written `package.Type`, not a bare `Type`.
     ///
     /// # Errors

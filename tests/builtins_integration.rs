@@ -7,7 +7,7 @@ use hel::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-// Answers nothing — these tests use only literals and function calls.
+// Answers nothing - these tests use only literals and function calls.
 struct EmptyResolver;
 impl HelResolver for EmptyResolver {
     fn resolve_attr(&self, _object: &str, _field: &str) -> Option<Value> {

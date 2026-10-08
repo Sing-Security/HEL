@@ -1,4 +1,4 @@
-//! HEL — Heuristic Expression Language
+//! HEL - Heuristic Expression Language
 //!
 //! A small, deterministic expression language for rule engines, security analysis and
 //! policy evaluation. You hand it a condition and a way to resolve attribute values; it
@@ -64,18 +64,18 @@
 //!
 //! # Where things live
 //!
-//! - This module — the grammar entry points, the [`AstNode`] tree, [`Value`], the
+//! - This module - the grammar entry points, the [`AstNode`] tree, [`Value`], the
 //!   [`HelResolver`] trait, and the evaluators.
-//! - [`builtins`] — the function registry and the generic `core.*` functions.
-//! - [`trace`] — per-atom evaluation traces, for explaining why a rule matched.
-//! - [`schema`] — optional declarations of a domain's types and packages.
-//! - `arena` — an evaluator that allocates its AST in a reusable bump arena
+//! - [`builtins`] - the function registry and the generic `core.*` functions.
+//! - [`trace`] - per-atom evaluation traces, for explaining why a rule matched.
+//! - [`schema`] - optional declarations of a domain's types and packages.
+//! - `arena` - an evaluator that allocates its AST in a reusable bump arena
 //!   (feature `arena`, on by default).
 //!
 //! A condition becomes a boolean in three steps: the pest grammar produces a parse tree,
 //! that tree is lowered into an [`AstNode`], and the AST is walked against a resolver.
-//! Each step is separately reachable — [`validate_expression`] stops after the first,
-//! [`parse_expression`] after the second — so a host can check a rule without running it.
+//! Each step is separately reachable - [`validate_expression`] stops after the first,
+//! [`parse_expression`] after the second - so a host can check a rule without running it.
 //!
 //! # Advanced Usage
 //!
@@ -129,7 +129,7 @@
 //!
 //! # Cargo features
 //!
-//! - `arena` (enabled by default) — adds the `arena` module, an evaluator that allocates AST nodes
+//! - `arena` (enabled by default) - adds the `arena` module, an evaluator that allocates AST nodes
 //!   in a bump arena and can reuse that memory across evaluations. It is a pure performance
 //!   win and removes no API.
 //!
@@ -148,7 +148,7 @@
 //! # Limits
 //!
 //! - The language is not Turing-complete. There is no arithmetic (`+`, `-`,
-//!   `*`, `/`), no negation, no assignment, and no control flow — a condition is built from
+//!   `*`, `/`), no negation, no assignment, and no control flow - a condition is built from
 //!   comparisons, `AND`/`OR`, literals, attribute access and function calls.
 //! - Numbers are `f64` at evaluation time. Integer literals are held as `u64` in the AST
 //!   and converted on use, so integers above 2^53 lose precision.
@@ -161,7 +161,7 @@
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
 // Runs every `rust` block in README.md under `cargo test --doc` without appending the README
-// to the rendered API docs — the include only fires while doctests are being collected.
+// to the rendered API docs - the include only fires while doctests are being collected.
 #![cfg_attr(doctest, doc = include_str!("../README.md"))]
 
 use pest::iterators::Pair;
@@ -207,7 +207,7 @@ mod parser {
 
 pub use parser::{HelParser, Rule};
 
-/// One node of a parsed HEL expression — one variant per syntactic construct.
+/// One node of a parsed HEL expression - one variant per syntactic construct.
 ///
 /// # Examples
 ///
@@ -389,14 +389,14 @@ pub trait HelResolver {
     ///
     /// `None` is not an error: the evaluator substitutes [`Value::Null`], so a comparison
     /// against a missing attribute is simply false. Return `Some(Value::Null)` instead if
-    /// you need to distinguish "absent" from "null" — HEL does not.
+    /// you need to distinguish "absent" from "null" - HEL does not.
     fn resolve_attr(&self, object: &str, field: &str) -> Option<Value>;
 }
 
 /// A resolver plus, optionally, a built-ins registry.
 ///
 /// This is what the resolver-based entry points hand to the evaluator. Most callers never
-/// build one directly — [`FactsEvalContext`] and [`evaluate`] cover the common case, and
+/// build one directly - [`FactsEvalContext`] and [`evaluate`] cover the common case, and
 /// [`evaluate_with_resolver`] / [`evaluate_with_context`] build this for you. Reach for it to
 /// configure a context once and pass it around.
 ///
@@ -523,8 +523,8 @@ impl std::error::Error for EvalError {}
 
 /// Enhanced error type for HEL with line/column information
 ///
-/// Returned by the high-level APIs — `validate_expression()`, `parse_expression()`,
-/// `evaluate()`, `evaluate_script()` — with optional line and column numbers for parse errors.
+/// Returned by the high-level APIs - `validate_expression()`, `parse_expression()`,
+/// `evaluate()`, `evaluate_script()` - with optional line and column numbers for parse errors.
 ///
 /// # Examples
 ///
@@ -561,7 +561,7 @@ pub struct HelError {
 pub enum ErrorKind {
     /// The text was not a valid expression or script.
     ParseError,
-    /// Evaluation reached a state it could not proceed from — most often a call to a
+    /// Evaluation reached a state it could not proceed from - most often a call to a
     /// function the context has no registry for.
     EvaluationError,
     /// An operand had the wrong type for the operator applied to it.
@@ -666,7 +666,7 @@ impl From<EvalError> for HelError {
 
 /// Parse a HEL expression into an AST (low-level API)
 ///
-/// The whole of `input` must be a single valid HEL expression — trailing content is a
+/// The whole of `input` must be a single valid HEL expression - trailing content is a
 /// parse error, not something ignored. Prefer [`parse_expression`] or
 /// [`validate_expression`], which report the failure as a `Result` instead of panicking.
 ///
@@ -838,15 +838,15 @@ fn parse_comparator(pair: Pair<Rule>) -> Comparator {
 /// Evaluate a HEL expression with a custom resolver (low-level API)
 ///
 /// Evaluates `condition` against attribute values supplied by `resolver`. Built-in
-/// functions are not available — use [`evaluate_with_context`] when the expression
+/// functions are not available - use [`evaluate_with_context`] when the expression
 /// calls any. Most callers are better served by [`evaluate`], which pairs with
 /// [`FactsEvalContext`].
 ///
 /// # Errors
 ///
 /// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
-/// [`EvalError::InvalidOperation`] if it calls a function — this entry point holds no
-/// registry, so *any* call is an error — and [`EvalError::TypeMismatch`] if an operand
+/// [`EvalError::InvalidOperation`] if it calls a function - this entry point holds no
+/// registry, so *any* call is an error - and [`EvalError::TypeMismatch`] if an operand
 /// has the wrong type for its operator or the expression as a whole is not a boolean.
 ///
 /// An attribute the resolver answers `None` for is not an error: it resolves to
@@ -954,7 +954,7 @@ fn evaluate_ast_with_context(ast: &AstNode, ctx: &EvalContext) -> Result<bool, E
             evaluate_comparison_with_context(left, *op, right, ctx)
         }
         // Any other node is a value rather than a condition, so it is only usable as a
-        // condition when that value is itself a boolean — otherwise the expression is a
+        // condition when that value is itself a boolean - otherwise the expression is a
         // type error rather than a silent false.
         other => {
             let value = eval_node_to_value_with_context(other, ctx)?;
@@ -1161,7 +1161,7 @@ pub fn validate_expression(expr: &str) -> Result<(), HelError> {
 /// `Result` rather than a panic.
 ///
 /// The AST is for *inspection*: walking a rule, rewriting it, printing it, or checking what it
-/// refers to. It does not make evaluation cheaper — every evaluator in this crate takes
+/// refers to. It does not make evaluation cheaper - every evaluator in this crate takes
 /// expression text and parses it, so holding an `Expression` saves nothing on the evaluation
 /// path. For repeated evaluation the lever is `hel::arena::ArenaParser`, which reuses the
 /// memory the AST is built in.
@@ -1191,8 +1191,8 @@ pub fn parse_expression(expr: &str) -> Result<Expression, HelError> {
 /// # Key format
 ///
 /// Keys are `"object.field"`, exactly as written in an expression. HEL's grammar only lets
-/// you reference an attribute through `object.field`, so a key without a dot — `"arch"`
-/// rather than `"binary.arch"` — can never be looked up. The lookup is an exact string
+/// you reference an attribute through `object.field`, so a key without a dot - `"arch"`
+/// rather than `"binary.arch"` - can never be looked up. The lookup is an exact string
 /// match: `"binary.arch"` and `"Binary.arch"` are different facts.
 ///
 /// # Examples
@@ -1248,7 +1248,7 @@ impl HelResolver for FactsEvalContext {
 /// # Errors
 ///
 /// Returns [`HelError`] if `expr` is not a valid HEL expression, if an operand has the
-/// wrong type for its operator, or if it calls a function — this path has no built-ins, so
+/// wrong type for its operator, or if it calls a function - this path has no built-ins, so
 /// use [`evaluate_with_context`] for expressions that call them.
 ///
 /// A fact that is not in `context` is not an error: it reads as [`Value::Null`].
@@ -1302,7 +1302,7 @@ pub struct Script {
 /// The parser is line-oriented, and a `let` binding absorbs the following lines only while
 /// the next line begins with a joining operator (`AND`, `OR`, `&&`, `||`) or the text
 /// collected so far is not yet a complete expression. So a binding keeps its continuation
-/// only if the break is unambiguous — either the next line starts with an operator, or the
+/// only if the break is unambiguous - either the next line starts with an operator, or the
 /// line before it ended mid-expression. Anything after the final expression is joined onto
 /// it and therefore has to be a continuation of it.
 ///
@@ -1429,7 +1429,7 @@ pub fn parse_script(script: &str) -> Result<Script, HelError> {
 ///
 /// Returns [`HelError`] if the script does not parse (see [`parse_script`]), or if
 /// evaluation fails: an operand has the wrong type for its operator, or the script calls a
-/// function — this path has no built-ins, so use [`evaluate_with_context`] with a
+/// function - this path has no built-ins, so use [`evaluate_with_context`] with a
 /// [`BuiltinsRegistry`] when a script needs them.
 ///
 /// A fact absent from `context` is not an error: it reads as [`Value::Null`].

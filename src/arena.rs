@@ -55,7 +55,7 @@ use pest::Parser;
 // Arena AST Types
 // ============================================================================
 
-/// An arena-allocated AST node — the counterpart of [`hel::AstNode`](crate::AstNode), with
+/// An arena-allocated AST node - the counterpart of [`hel::AstNode`](crate::AstNode), with
 /// children as arena references (`&'arena`) rather than `Box` / `Vec` / `Arc`. The `'arena`
 /// lifetime ties every node to its arena, so a node cannot outlive the memory it points into.
 #[derive(Debug, Clone, Copy)]
@@ -190,7 +190,7 @@ impl ArenaParser {
     /// # Warning
     ///
     /// Every AST node previously returned by this parser is invalidated. The borrow checker
-    /// enforces this — `reset` takes `&mut self` while a live node holds `&self` — so safe code
+    /// enforces this - `reset` takes `&mut self` while a live node holds `&self` - so safe code
     /// cannot carry a node across this call.
     pub fn reset(&mut self) {
         self.arena.reset();
@@ -414,7 +414,7 @@ impl<'a> ArenaEvalContext<'a> {
 /// # Errors
 ///
 /// Returns [`HelError`] if `expr` is not a valid HEL expression, if an operand has the
-/// wrong type for its operator, or if the expression calls a function — built-ins are not
+/// wrong type for its operator, or if the expression calls a function - built-ins are not
 /// available on this path. An attribute absent from `context` is *not* an error; it reads
 /// as [`Value::Null`].
 ///
@@ -444,14 +444,14 @@ pub fn evaluate_arena(
 /// Evaluate arena AST with a resolver
 ///
 /// Low-level API for evaluating an arena-allocated AST with a custom resolver.
-/// Built-in functions are not available — use [`evaluate_with_context_arena`] when
+/// Built-in functions are not available - use [`evaluate_with_context_arena`] when
 /// the expression calls any.
 ///
 /// # Errors
 ///
 /// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
-/// [`EvalError::InvalidOperation`] if it calls a function — this entry point holds no
-/// registry, so *any* call is an error — and [`EvalError::TypeMismatch`] if an operand
+/// [`EvalError::InvalidOperation`] if it calls a function - this entry point holds no
+/// registry, so *any* call is an error - and [`EvalError::TypeMismatch`] if an operand
 /// has the wrong type for its operator or the expression as a whole is not a boolean.
 ///
 /// An attribute the resolver answers `None` for is not an error: it resolves to
@@ -560,7 +560,7 @@ fn eval_node_to_value_arena<'arena>(
             // This evaluator has no variable bindings, so a bare identifier can only be a
             // string literal. The heap evaluator consults its bindings first and falls back
             // to the same interpretation, so an identifier only differs between the two
-            // when the expression is a script binding — which this path does not support.
+            // when the expression is a script binding - which this path does not support.
             Ok(Value::String(Arc::from(*s)))
         }
         AstNode::Attribute { object, field } => Ok(ctx

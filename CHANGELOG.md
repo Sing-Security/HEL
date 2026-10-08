@@ -28,20 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking — the public enums are `#[non_exhaustive]`**: `AstNode`, `Comparator`, `Value`,
+- **Breaking - the public enums are `#[non_exhaustive]`**: `AstNode`, `Comparator`, `Value`,
   `EvalError`, `ErrorKind`, `FieldType` and `PackageError` now need a wildcard arm when
   matched from another crate. Adding a variant to any of them is no longer a breaking change.
 - **`core.contains` uses the language's `==`**: list membership is decided by the same
   comparison the `CONTAINS` operator uses, rather than by a second, separately written
   equality. The two spellings of "is this element in this list" can no longer disagree. As a
-  consequence a *list* element is no longer matched recursively — `core.contains([[1, 2]],
+  consequence a *list* element is no longer matched recursively - `core.contains([[1, 2]],
   [1, 2])` is now `false`, matching `[[1, 2]] CONTAINS [1, 2]`.
 
 ### Fixed
 
 - **The grammar is anchored**: `validate_expression`, `parse_expression` and `parse_script`
   now reject trailing input. pest matches a *prefix*, so an unanchored grammar accepted
-  `binary.arch == "elf" garbage` as the valid prefix and silently ignored the rest — syntax
+  `binary.arch == "elf" garbage` as the valid prefix and silently ignored the rest - syntax
   validation did not actually validate. Rules that previously "validated" while containing
   trailing junk will now correctly fail to parse.
 - **The resolver-based evaluators no longer panic**: `evaluate_with_resolver`,
@@ -57,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- `FactsEvalContext::from_json` — unused, and the JSON shape it accepted was never specified.
+- `FactsEvalContext::from_json` - unused, and the JSON shape it accepted was never specified.
 
 ### Dependencies
 

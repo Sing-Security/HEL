@@ -21,8 +21,8 @@
 //! clock, the filesystem or global mutable state. The evaluator calls it from whatever thread
 //! happens to be evaluating, so anything else would make results depend on timing.
 //!
-//! The registry itself is a `BTreeMap`, so iteration order — and therefore
-//! [`BuiltinsRegistry::namespaces`] and [`BuiltinsRegistry::functions_in_namespace`] — is
+//! The registry itself is a `BTreeMap`, so iteration order - and therefore
+//! [`BuiltinsRegistry::namespaces`] and [`BuiltinsRegistry::functions_in_namespace`] - is
 //! stable. Namespaces and the *looked-up* function names are lowercased, so provider key
 //! names should be lowercase too.
 
@@ -36,7 +36,7 @@ use super::{EvalError, Value};
 /// The signature every built-in function shares.
 ///
 /// Receives the call's arguments (already evaluated) and returns a [`Value`] or an
-/// [`EvalError`]. Implementations must be pure and deterministic — see the module docs —
+/// [`EvalError`]. Implementations must be pure and deterministic - see the module docs -
 /// and must validate their own arity, since the registry does not check it.
 ///
 /// The `Arc` exists so a provider's map can be cloned into a registry cheaply; `Send +
@@ -49,7 +49,7 @@ pub type BuiltinFn = Arc<dyn Fn(&[Value]) -> Result<Value, EvalError> + Send + S
 
 /// Supplies a namespace and the built-in functions callable under it.
 ///
-/// Implement this in the host crate for whatever vocabulary that host needs — HEL never
+/// Implement this in the host crate for whatever vocabulary that host needs - HEL never
 /// needs to know what the functions mean.
 ///
 /// # Examples
@@ -108,7 +108,7 @@ pub trait BuiltinsProvider {
 /// Holds registered providers and dispatches calls to their functions.
 ///
 /// Construct one, [`register`](Self::register) each provider, then hand it to the
-/// evaluator — `evaluate_with_context`, `evaluate_with_trace` and friends all take an
+/// evaluator - `evaluate_with_context`, `evaluate_with_trace` and friends all take an
 /// `Option<&BuiltinsRegistry>`. A registry with no providers is legal but useless: every
 /// call fails with [`EvalError::InvalidOperation`].
 ///
@@ -220,7 +220,7 @@ impl BuiltinsRegistry {
 
     /// List every function registered under `namespace`, in sorted order.
     ///
-    /// Returns `None` if no provider is registered for that namespace — an empty namespace
+    /// Returns `None` if no provider is registered for that namespace - an empty namespace
     /// and an unknown one are different answers, and this distinguishes them. The namespace
     /// is matched case-insensitively.
     #[must_use]

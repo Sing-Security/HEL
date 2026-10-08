@@ -1,4 +1,4 @@
-# HEL — Heuristic Expression Language
+# HEL - Heuristic Expression Language
 
 SPDX-License-Identifier: Apache-2.0
 
@@ -249,7 +249,7 @@ has_sms_perms AND has_obfuscation
 ### Best Practices for Integration
 
 1. **Validation Before Deployment**: Always validate rule scripts before loading them.
-   A script is not a single expression — it has `let` bindings — so use `parse_script`,
+   A script is not a single expression - it has `let` bindings - so use `parse_script`,
    not `validate_expression`, to check one:
 
    ```rust
@@ -290,7 +290,7 @@ has_sms_perms AND has_obfuscation
    }
    ```
 
-   Note that evaluation takes the script text, not a `Script` — `evaluate_script` and
+   Note that evaluation takes the script text, not a `Script` - `evaluate_script` and
    `evaluate` re-parse on each call. Parsing up front is still worth doing to fail fast;
    it does not by itself make repeated evaluation cheaper. For a tight loop, the arena
    allocator (`hel::arena::ArenaParser`, reused and reset between calls) is the lever the
@@ -368,17 +368,17 @@ println!("{}", trace.pretty_print()); // deterministic, human-friendly audit tra
 - **Limits**
   - The language is declarative: comparisons, `AND`/`OR`, literals, attribute access and function calls. There is no arithmetic (`+`, `-`, `*`, `/`), no negation, and no control flow.
   - Function calls require a `BuiltinsRegistry` in the evaluation context. Without one they fail with an `InvalidOperation` error rather than silently evaluating to false.
-  - The crate exposes primitives — parser, AST, evaluators, trace, schema loader — and deliberately does not provide a monolithic compiler or a rule engine for any particular domain.
+  - The crate exposes primitives - parser, AST, evaluators, trace, schema loader - and deliberately does not provide a monolithic compiler or a rule engine for any particular domain.
 - **Numbers**
   - Runtime numbers are `f64`. Integer literals are stored as `u64` in the AST and converted on use, so integers above 2^53 lose precision.
   - There is no regex engine here. If a custom built-in pattern-matches, it is responsible for keeping that bounded and deterministic.
 
 ## Documentation and where to look next
 
-- `hel::schema` — package manifests, `SchemaPackage`, schema parsing helpers.
-- `hel::builtins` — provider/registry API and `CoreBuiltinsProvider`.
-- `hel::trace` — trace capture and pretty-print helpers.
-- `src/lib.rs` — the parser entry points and the AST.
+- `hel::schema` - package manifests, `SchemaPackage`, schema parsing helpers.
+- `hel::builtins` - provider/registry API and `CoreBuiltinsProvider`.
+- `hel::trace` - trace capture and pretty-print helpers.
+- `src/lib.rs` - the parser entry points and the AST.
 - The tests in `src/*` are the specification for edge-case behaviour: NaN handling, built-in dispatch, trace ordering, package collision detection.
 
 ## Contributing

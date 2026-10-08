@@ -95,7 +95,7 @@ impl Default for EvalTrace {
 ///
 /// Returns [`EvalError::ParseError`] if `condition` is not a valid HEL expression,
 /// [`EvalError::InvalidOperation`] if the expression calls a function that `builtins`
-/// does not define — or if `builtins` is `None` and the expression calls one at all —
+/// does not define - or if `builtins` is `None` and the expression calls one at all -
 /// and [`EvalError::TypeMismatch`] if an operand has the wrong type for its operator.
 ///
 /// An attribute the resolver answers `None` for is not an error: it resolves to
