@@ -1,6 +1,6 @@
 [package]
 name = "hel"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "HEL - Heuristic Expression Language: a deterministic, auditable expression language & parser, AST, builtin registry and evaluator."
 readme = "README.md"
