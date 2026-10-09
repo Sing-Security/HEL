@@ -157,7 +157,7 @@ assert!(result2);
 ### Builtins and Extensibility
 - `BuiltinsProvider` trait and `BuiltinsRegistry` for namespace-aware function dispatch
 - `BuiltinFn` type: pure, deterministic functions that map argument `Value`s to a `Result<Value, EvalError>`
-- `CoreBuiltinsProvider` included with generic functions (`core.len`, `core.contains`, `core.upper`, `core.lower`)
+- `CoreBuiltinsProvider` included with generic functions (`core.len`, `core.contains`, `core.upper`, `core.lower`, `core.is_null`)
 
 ### Trace & Audit
 - `evaluate_with_trace(condition, resolver, Option<&BuiltinsRegistry>) -> Result<EvalTrace, EvalError>`

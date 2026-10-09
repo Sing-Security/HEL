@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-09
+
+### Changed
+
+- **Breaking - `Null` fails every comparison, `!=` included.** A missing attribute resolves
+  to `Value::Null`, and a comparison is now false whenever either side is `Null` - including
+  `!=`, and including `Null == Null`. Previously `!=` was defined as the negation of `==`,
+  so `security.nx != true` evaluated *true* when `security.nx` was missing: a rule could
+  pass because the data it needed was absent. Rules relying on that now evaluate to
+  `false`; test for absence explicitly with the new `core.is_null(x)`.
+- **Breaking - schema parsing is strict.** `parse_schema` now rejects a type name declared
+  twice, a type block that is never closed, and content outside a type block that is not
+  `type`, `}`, `import`, a comment or a blank line. Previously a duplicate silently replaced
+  the earlier declaration, a truncated file could parse as valid, and stray lines were
+  ignored. `import` lines are now formally skipped, where before they were ignored by
+  accident.
+- **Breaking - expressions are capped at 128 levels of bracket nesting** (`(`, `[`, `{`).
+  Deeper input is a parse error in every entry point instead of a stack overflow that
+  aborted the process. Brackets inside string literals do not count.
+- **The grammar no longer backtracks exponentially on nested parentheses.** The comparison
+  was written as a separate alternative beside `primary`, so a failed comparator made pest
+  re-parse the whole left operand - the cost doubled at every nesting level, and an
+  expression with roughly 30 nested parentheses spun for minutes (128 was effectively
+  forever). `comparison_term` now parses its primary once and treats the comparison tail as
+  optional, which is linear. Callers matching on the raw parse tree are affected: the pest
+  `Rule::comparison` variant is gone, and `Rule::comparison_term` carries the primary, the
+  comparator and the right operand as its children.
+- **Traced evaluation agrees with ordinary evaluation.** `evaluate_with_trace` returned
+  `false` for a standalone boolean call such as `core.contains(["a"], "a")` where
+  `evaluate_with_context` returned `true`, and silently accepted a non-boolean condition
+  that the ordinary path rejects as a type error. The trace path now applies the same
+  value-then-boolean-check rule, and conditions nested inside operands (for example
+  `f((a == 1))`) produce atoms in the trace.
+- **`facts_used()` reports what the evaluation actually read.** Attributes are collected
+  from the AST - both sides of a comparison, list/map literals and function-call arguments -
+  instead of sniffing the atoms' display strings. `a.x == b.y` previously reported only
+  `a.x`; `core.len(...)` was reported as though it were a fact path. An `AND`/`OR` branch
+  that short-circuits is no longer reported as read. `EvalTrace::add_atom` no longer
+  contributes to `facts_used`; fact collection happens during evaluation.
+- **The `NaN` documentation now matches the behaviour:** `NaN != x` is true for every `x`,
+  including `NaN != NaN`; the other comparators are false, as in IEEE 754.
+- **Package manifests documented honestly:** `schemas` entries are literal file paths - the
+  manifest claimed glob patterns were expanded, but they never were - and dependency version
+  requirements are recorded but not enforced, as `PackageRegistry` already behaved.
+
+### Added
+
+- `core.is_null(value)` - `true` when the value is `Null`, e.g. an attribute the resolver
+  had no value for. The comparison change above removed the accidental way of testing for
+  absence.
+
+[0.4.0]: https://github.com/Sing-Security/HEL/compare/v0.3.1...v0.4.0
+
 ## [0.3.1] - 2026-10-07
 
 ### Changed

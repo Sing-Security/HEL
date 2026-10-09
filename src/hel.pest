@@ -16,7 +16,11 @@ logical_or      =  { logical_and ~ (or_op ~ logical_and)* }
 logical_and     =  { term ~ (and_op ~ term)* }
 term            =  { comparison_term | primary }
 
-comparison_term = { comparison | primary }
+// `primary` is parsed once and the comparison tail is optional. The previous shape - a
+// `comparison = { primary ~ comparator ~ primary }` alternative tried beside `primary` -
+// re-parsed the whole left operand whenever the comparator failed, doubling the work at
+// every nesting level (2^n) and hanging the parser on deeply nested parentheses.
+comparison_term = { primary ~ (comparator ~ primary)? }
 
 primary         = { parenthesized | literal | function_call | attribute_access | symbolic | variable | identifier }
 
@@ -31,6 +35,8 @@ list_literal    = { "[" ~ (primary ~ ("," ~ primary)*)? ~ "]" }
 map_literal     = { "{" ~ (map_entry ~ ("," ~ map_entry)*)? ~ "}" }
 map_entry       = { string_literal ~ ":" ~ primary }
 
+// String literal: no escape sequences - the literal ends at the next `"`, and `\` is an
+// ordinary character.
 string_literal  = { "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
 float_literal   = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
 number_literal  = { ("0x" ~ ASCII_HEX_DIGIT+) | ASCII_DIGIT+ }
@@ -46,7 +52,6 @@ function_call   = { identifier ~ ("." ~ identifier)? ~ "(" ~ (primary ~ ("," ~ p
 // Attribute access: object.field (but not followed by parentheses)
 attribute_access = { identifier ~ ("." ~ identifier)+ ~ !("(") }
 
-comparison      = { primary ~ comparator ~ primary }
 comparator      = { "==" | "!=" | ">=" | "<=" | ">" | "<" | "CONTAINS" | "IN" }
 
 or_op           = _{ "||" | "OR" | "or" }

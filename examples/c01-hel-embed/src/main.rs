@@ -69,12 +69,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("{}", trace.pretty_print());
 
-    // `facts_used` is sorted, so it can be compared against a stable order. A builtin call is
-    // recorded there too, spelled `namespace.name(...)`.
-    #[cfg(not(feature = "acme_provider"))]
+    // `facts_used` is sorted, so it can be compared against a stable order. It lists the
+    // attributes the rule read; a builtin call like `acme.score(...)` is not a fact path
+    // and does not appear, though attributes passed to a builtin would.
     let expected_facts = vec!["binary.format", "security.nx_enabled"];
-    #[cfg(feature = "acme_provider")]
-    let expected_facts = vec!["acme.score(...)", "binary.format", "security.nx_enabled"];
     assert_eq!(trace.facts_used(), expected_facts);
 
     Ok(())

@@ -147,14 +147,17 @@ impl Default for Schema {
 ///
 /// Recognised primitives are `Bool`/`Boolean`, `String`, and `Number`/`Float`/`f64`;
 /// `List<T>` and `Map<T>` nest; any other name is a [`FieldType::TypeRef`]. A `?` suffix on
-/// a field name marks it [`optional`](FieldDef::optional). Blank lines and lines beginning
-/// with `//` or `#` are ignored, and trailing commas are tolerated. The finished schema is
-/// checked by [`Schema::validate`], so an undefined type reference is a parse error.
+/// a field name marks it [`optional`](FieldDef::optional). Blank lines, lines beginning with
+/// `//` or `#`, and `import` lines (resolved by the package registry, not the schema) are
+/// ignored, and trailing commas are tolerated. The finished schema is checked by
+/// [`Schema::validate`], so an undefined type reference is a parse error.
 ///
 /// # Errors
 ///
 /// Returns `Err` if a `type` header is malformed, if a field line has neither `:` nor a
-/// name, or if a field's type reference has no matching declaration.
+/// name, if a field's type reference has no matching declaration, if a type name is
+/// declared twice, if a type block is never closed, or if a line outside a type block is
+/// none of `type`, `}`, `import`, a comment or blank.
 ///
 /// # Examples
 ///
@@ -176,7 +179,6 @@ impl Default for Schema {
 pub fn parse_schema(input: &str) -> Result<Schema, String> {
     let mut schema = Schema::new();
     let mut current_type: Option<TypeDef> = None;
-    let mut in_type_block = false;
 
     for line in input.lines() {
         let line = line.trim();
@@ -185,9 +187,17 @@ pub fn parse_schema(input: &str) -> Result<Schema, String> {
             continue;
         }
 
+        // Package imports name other packages; the registry resolves them, not the schema.
+        if line.starts_with("import ") {
+            continue;
+        }
+
         if line.starts_with("type ") {
-            if let Some(type_def) = current_type.take() {
-                schema.add_type(type_def);
+            if let Some(type_def) = current_type {
+                return Err(format!(
+                    "Unclosed type block: '{}' was never closed with '}}'",
+                    type_def.name
+                ));
             }
 
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -200,20 +210,23 @@ pub fn parse_schema(input: &str) -> Result<Schema, String> {
                 fields: Vec::new(),
                 description: None,
             });
-            in_type_block = true;
             continue;
         }
 
         if line == "}" {
-            if let Some(type_def) = current_type.take() {
-                schema.add_type(type_def);
+            let type_def = current_type
+                .take()
+                .ok_or_else(|| "Unexpected '}' outside a type block".to_string())?;
+
+            if schema.types.contains_key(&type_def.name) {
+                return Err(format!("Duplicate type definition: {}", type_def.name));
             }
-            in_type_block = false;
+            schema.add_type(type_def);
             continue;
         }
 
-        if in_type_block && current_type.is_some() {
-            if let Some(type_def) = current_type.as_mut() {
+        match current_type.as_mut() {
+            Some(type_def) => {
                 // A `?` suffix on the name is the only difference between a required and
                 // an optional field.
                 let field_line = line.trim_end_matches(',');
@@ -240,11 +253,15 @@ pub fn parse_schema(input: &str) -> Result<Schema, String> {
                     description: None,
                 });
             }
+            None => return Err(format!("Unexpected content outside a type block: {}", line)),
         }
     }
 
     if let Some(type_def) = current_type {
-        schema.add_type(type_def);
+        return Err(format!(
+            "Unclosed type block: '{}' was never closed with '}}'",
+            type_def.name
+        ));
     }
 
     schema.validate()?;
@@ -354,6 +371,71 @@ type Lead {
         let result = parse_schema(schema_text);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Undefined type reference"));
+    }
+
+    #[test]
+    fn test_parse_schema_rejects_duplicate_type() {
+        let schema_text = r#"
+type Lead {
+    email: String
+}
+
+type Lead {
+    phone: String
+}
+"#;
+
+        let result = parse_schema(schema_text);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Duplicate type definition"));
+    }
+
+    #[test]
+    fn test_parse_schema_rejects_unclosed_block_at_eof() {
+        let result = parse_schema("type Lead {\n    email: String\n");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unclosed type block"));
+    }
+
+    #[test]
+    fn test_parse_schema_rejects_unclosed_block_at_next_header() {
+        let schema_text = r#"
+type Lead {
+    email: String
+
+type Contact {
+    name: String
+}
+"#;
+
+        let result = parse_schema(schema_text);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unclosed type block"));
+    }
+
+    #[test]
+    fn test_parse_schema_rejects_stray_content() {
+        let result = parse_schema("email: String");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("outside a type block"));
+
+        let result = parse_schema("}");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unexpected '}'"));
+    }
+
+    #[test]
+    fn test_parse_schema_tolerates_import_lines() {
+        let schema_text = r#"
+import "core-types";
+
+type Lead {
+    email: String
+}
+"#;
+
+        let schema = parse_schema(schema_text).expect("parse failed");
+        assert_eq!(schema.types.len(), 1);
     }
 }
 

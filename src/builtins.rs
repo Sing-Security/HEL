@@ -248,9 +248,11 @@ impl BuiltinsRegistry {
 /// | `core.contains(list, value)` | membership by the language's `==` |
 /// | `core.contains(string, substring)` | substring test; a non-string needle is `false` |
 /// | `core.upper(string)` / `core.lower(string)` | Unicode case conversion |
+/// | `core.is_null(value)` | `true` when the value is `Null` - e.g. an attribute the resolver had no value for |
 ///
-/// Every one of them errors with [`EvalError::InvalidOperation`] on the wrong arity and
-/// [`EvalError::TypeMismatch`] on an argument of the wrong type.
+/// Every one of them errors with [`EvalError::InvalidOperation`] on the wrong arity, and
+/// all but `core.is_null` also error with [`EvalError::TypeMismatch`] on an argument of
+/// the wrong type; `core.is_null` accepts any single value.
 ///
 /// # Examples
 ///
@@ -376,6 +378,20 @@ impl BuiltinsProvider for CoreBuiltinsProvider {
             }) as BuiltinFn,
         );
 
+        // core.is_null(value)
+        builtins.insert(
+            "is_null".to_string(),
+            Arc::new(|args: &[Value]| -> Result<Value, EvalError> {
+                if args.len() != 1 {
+                    return Err(EvalError::InvalidOperation(
+                        "core.is_null expects 1 argument".to_string(),
+                    ));
+                }
+
+                Ok(Value::Bool(matches!(args[0], Value::Null)))
+            }) as BuiltinFn,
+        );
+
         builtins
     }
 }
@@ -434,6 +450,40 @@ mod tests {
 
         let result = lower_fn(&[Value::String("WORLD".into())]).expect("lower failed");
         assert_eq!(result, Value::String("world".into()));
+    }
+
+    #[test]
+    fn test_core_is_null_builtin() {
+        struct MaybeResolver;
+        impl crate::HelResolver for MaybeResolver {
+            fn resolve_attr(&self, object: &str, _: &str) -> Option<Value> {
+                if object == "known" {
+                    Some(Value::String("x".into()))
+                } else {
+                    None
+                }
+            }
+        }
+
+        let mut registry = BuiltinsRegistry::new();
+        registry
+            .register(&CoreBuiltinsProvider)
+            .expect("register failed");
+
+        // A missing attribute is Null; a present one is not; the wrong arity is an error.
+        assert!(crate::evaluate_with_context(
+            "core.is_null(missing.attr) == true",
+            &MaybeResolver,
+            &registry
+        )
+        .expect("evaluated"));
+        assert!(!crate::evaluate_with_context(
+            "core.is_null(known.attr)",
+            &MaybeResolver,
+            &registry
+        )
+        .expect("evaluated"));
+        assert!(crate::evaluate_with_context("core.is_null()", &MaybeResolver, &registry).is_err());
     }
 
     #[test]

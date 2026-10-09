@@ -152,11 +152,19 @@
 //!   comparisons, `AND`/`OR`, literals, attribute access and function calls.
 //! - Numbers are `f64` at evaluation time. Integer literals are held as `u64` in the AST
 //!   and converted on use, so integers above 2^53 lose precision.
-//! - `NaN` comparisons are false, as in IEEE 754.
+//! - A missing attribute resolves to [`Value::Null`], and every comparison involving `Null`
+//!   is false - `!=` included, and `Null == Null` too. A rule cannot pass because the data
+//!   it needed was absent; test for absence with `core.is_null(x)`.
+//! - `NaN` fails `==`, `<`, `<=`, `>`, `>=`; `NaN != x` is true for every `x`, including
+//!   `NaN != NaN`, as in IEEE 754.
+//! - String literals end at the next `"`: there are no escape sequences, and `\` is an
+//!   ordinary character.
+//! - Expressions accept at most 128 levels of bracket nesting (`(`, `[`, `{`). Deeper input
+//!   is a parse error rather than a stack overflow.
 //! - Calling a function without a [`builtins`] registry in the evaluation context is an
 //!   error, not a silent default.
-//! - There is no borrow or evaluator-level recursion limit; an expression is a fixed tree,
-//!   so evaluation terminates by construction, but a recursive custom built-in would not.
+//! - There is no recursion limit beyond that nesting cap; an expression is a fixed tree, so
+//!   evaluation terminates by construction, but a recursive custom built-in would not.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
@@ -348,6 +356,9 @@ pub enum Comparator {
 #[non_exhaustive]
 pub enum Value {
     /// Null value (represents missing or undefined data)
+    ///
+    /// Every comparison involving `Null` is false, `!=` included - see the
+    /// [module limits](crate#limits). Test for it with `core.is_null`.
     Null,
     /// Boolean value (true or false)
     Bool(bool),
@@ -387,9 +398,10 @@ pub enum Value {
 pub trait HelResolver {
     /// Resolve one `object.field` attribute, or `None` if the host has no such value.
     ///
-    /// `None` is not an error: the evaluator substitutes [`Value::Null`], so a comparison
-    /// against a missing attribute is simply false. Return `Some(Value::Null)` instead if
-    /// you need to distinguish "absent" from "null" - HEL does not.
+    /// `None` is not an error: the evaluator substitutes [`Value::Null`], so every
+    /// comparison against a missing attribute is false, `!=` included. Return
+    /// `Some(Value::Null)` instead if you need to distinguish "absent" from "null" - HEL
+    /// does not. Test for absence in a rule with `core.is_null`.
     fn resolve_attr(&self, object: &str, field: &str) -> Option<Value>;
 }
 
@@ -683,6 +695,7 @@ impl From<EvalError> for HelError {
 /// ```
 #[must_use]
 pub fn parse_rule(input: &str) -> AstNode {
+    check_nesting(input).expect("parse error");
     let mut pairs = HelParser::parse(Rule::top, input).expect("parse error");
     build_ast(pairs.next().unwrap())
 }
@@ -712,16 +725,23 @@ fn build_ast(pair: Pair<Rule>) -> AstNode {
             }
         }
 
-        Rule::comparison => {
+        Rule::comparison_term => {
             let mut inner = pair.into_inner();
             let left = build_ast(inner.next().expect("Missing left operand"));
-            let op = parse_comparator(inner.next().expect("Missing comparator"));
-            let right = build_ast(inner.next().expect("Missing right operand"));
 
-            AstNode::Comparison {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
+            // The comparator and right operand are absent for a bare primary.
+            match inner.next() {
+                Some(op_pair) => {
+                    let op = parse_comparator(op_pair);
+                    let right = build_ast(inner.next().expect("Missing right operand"));
+
+                    AstNode::Comparison {
+                        left: Box::new(left),
+                        op,
+                        right: Box::new(right),
+                    }
+                }
+                None => left,
             }
         }
 
@@ -805,7 +825,7 @@ fn build_ast(pair: Pair<Rule>) -> AstNode {
             AstNode::Identifier(pair.as_str().into())
         }
 
-        Rule::primary | Rule::comparison_term | Rule::term | Rule::parenthesized => {
+        Rule::primary | Rule::term | Rule::parenthesized => {
             build_ast(pair.into_inner().next().expect("Empty wrapper"))
         }
 
@@ -957,7 +977,7 @@ fn evaluate_ast_with_context(ast: &AstNode, ctx: &EvalContext) -> Result<bool, E
         // condition when that value is itself a boolean - otherwise the expression is a
         // type error rather than a silent false.
         other => {
-            let value = eval_node_to_value_with_context(other, ctx)?;
+            let value = eval_node_to_value_with_context(other, ctx, None)?;
             match value {
                 Value::Bool(b) => Ok(b),
                 _ => Err(EvalError::TypeMismatch {
@@ -976,14 +996,21 @@ fn evaluate_comparison_with_context(
     right: &AstNode,
     ctx: &EvalContext,
 ) -> Result<bool, EvalError> {
-    let left_val = eval_node_to_value_with_context(left, ctx)?;
-    let right_val = eval_node_to_value_with_context(right, ctx)?;
+    let left_val = eval_node_to_value_with_context(left, ctx, None)?;
+    let right_val = eval_node_to_value_with_context(right, ctx, None)?;
     Ok(compare_new_values(&left_val, &right_val, op))
 }
 
+/// Evaluate one node to a [`Value`].
+///
+/// `trace` carries the [`EvalTrace`] being filled in, when there is one: the traced
+/// evaluator passes it down so that conditions nested inside operands (list elements,
+/// function arguments) record their atoms and facts too, exactly as they would at the top
+/// level. The ordinary evaluators pass `None`.
 pub(crate) fn eval_node_to_value_with_context(
     node: &AstNode,
     ctx: &EvalContext,
+    mut trace: Option<&mut EvalTrace>,
 ) -> Result<Value, EvalError> {
     match node {
         AstNode::Bool(b) => Ok(Value::Bool(*b)),
@@ -1006,22 +1033,27 @@ pub(crate) fn eval_node_to_value_with_context(
         AstNode::ListLiteral(elements) => {
             let values: Result<Vec<Value>, EvalError> = elements
                 .iter()
-                .map(|e| eval_node_to_value_with_context(e, ctx))
+                .map(|e| eval_node_to_value_with_context(e, ctx, trace.as_deref_mut()))
                 .collect();
             Ok(Value::List(values?))
         }
         AstNode::MapLiteral(entries) => {
             let mut map = BTreeMap::new();
             for (key, value_node) in entries {
-                let value = eval_node_to_value_with_context(value_node, ctx)?;
+                let value = eval_node_to_value_with_context(value_node, ctx, trace.as_deref_mut())?;
                 map.insert(key.clone(), value);
             }
             Ok(Value::Map(map))
         }
         // A condition nested as an operand is re-wrapped as a Value so that, say,
-        // `(a == 1) == true` has something to compare against.
+        // `(a == 1) == true` has something to compare against. When a trace is being
+        // recorded, the nested condition goes through the traced evaluator so its atoms
+        // and facts are captured like any other.
         AstNode::Comparison { .. } | AstNode::And(_) | AstNode::Or(_) => {
-            let bool_result = evaluate_ast_with_context(node, ctx)?;
+            let bool_result = match trace.as_deref_mut() {
+                Some(t) => crate::trace::evaluate_ast_with_trace(node, ctx, t)?,
+                None => evaluate_ast_with_context(node, ctx)?,
+            };
             Ok(Value::Bool(bool_result))
         }
         AstNode::FunctionCall {
@@ -1031,7 +1063,7 @@ pub(crate) fn eval_node_to_value_with_context(
         } => {
             let arg_values: Result<Vec<Value>, EvalError> = args
                 .iter()
-                .map(|arg| eval_node_to_value_with_context(arg, ctx))
+                .map(|arg| eval_node_to_value_with_context(arg, ctx, trace.as_deref_mut()))
                 .collect();
             let arg_values = arg_values?;
 
@@ -1050,10 +1082,14 @@ pub(crate) fn eval_node_to_value_with_context(
 }
 
 pub(crate) fn compare_new_values(left: &Value, right: &Value, op: Comparator) -> bool {
+    // `Null` is the value of a missing attribute, and it fails every comparison - `!=`
+    // included, and `Null == Null` too - so a rule cannot pass because the data it needed
+    // was absent. Test for absence explicitly with `core.is_null`.
+    if matches!(left, Value::Null) || matches!(right, Value::Null) {
+        return false;
+    }
     match op {
         Comparator::Eq => match (left, right) {
-            (Value::Null, Value::Null) => true,
-            (Value::Null, _) | (_, Value::Null) => false,
             (Value::Bool(l), Value::Bool(r)) => l == r,
             (Value::String(l), Value::String(r)) => l == r,
             (Value::Number(l), Value::Number(r)) => {
@@ -1114,6 +1150,35 @@ fn parse_number(val: &str) -> Option<u64> {
 /// Represents a parsed HEL expression
 pub type Expression = AstNode;
 
+/// Maximum bracket nesting depth (`(`, `[`, `{`) an expression may reach. Both the pest
+/// parser and the AST builders recurse once per level, so beyond this the input is rejected
+/// as a parse error instead of being allowed to exhaust the stack.
+const MAX_NESTING_DEPTH: usize = 128;
+
+/// Reject expressions nested deeper than [`MAX_NESTING_DEPTH`] before the recursive parser
+/// sees them. Brackets inside string literals do not count.
+pub(crate) fn check_nesting(expr: &str) -> Result<(), HelError> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    for ch in expr.chars() {
+        match ch {
+            '"' => in_string = !in_string,
+            '(' | '[' | '{' if !in_string => {
+                depth += 1;
+                if depth > MAX_NESTING_DEPTH {
+                    return Err(HelError::parse_error(format!(
+                        "Expression nesting exceeds the maximum depth of {}",
+                        MAX_NESTING_DEPTH
+                    )));
+                }
+            }
+            ')' | ']' | '}' if !in_string => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Validates HEL expression syntax without evaluation
 ///
 /// The whole of `expr` must be one expression: trailing characters are a parse error, not
@@ -1122,8 +1187,8 @@ pub type Expression = AstNode;
 /// # Errors
 ///
 /// Returns [`HelError`] carrying a line and column if `expr` is not a valid HEL
-/// expression, whether the failure is bad syntax, an unterminated literal, or valid
-/// syntax followed by extra input.
+/// expression, whether the failure is bad syntax, an unterminated literal, valid
+/// syntax followed by extra input, or nesting deeper than 128 brackets.
 ///
 /// # Examples
 ///
@@ -1138,6 +1203,7 @@ pub type Expression = AstNode;
 /// assert!(validate_expression("(").is_err());
 /// ```
 pub fn validate_expression(expr: &str) -> Result<(), HelError> {
+    check_nesting(expr)?;
     match HelParser::parse(Rule::top, expr) {
         Ok(_) => Ok(()),
         Err(e) => {
@@ -1460,7 +1526,8 @@ pub fn evaluate_script(script: &str, context: &FactsEvalContext) -> Result<bool,
     // Bindings are threaded through in declaration order, each one seeing those before it.
     let mut eval_ctx = EvalContext::new(context);
     for (name, expr) in &parsed.bindings {
-        let value = eval_node_to_value_with_context(expr, &eval_ctx).map_err(HelError::from)?;
+        let value =
+            eval_node_to_value_with_context(expr, &eval_ctx, None).map_err(HelError::from)?;
         eval_ctx = eval_ctx.with_variable(name.clone(), value);
     }
 
@@ -1560,6 +1627,72 @@ mod tests {
         let cond = "test.nan > 0.0";
         let res = evaluate_with_resolver(cond, &resolver).expect("evaluation failed");
         assert!(!res, "NaN comparison should be false");
+
+        // `!=` stays the negation of `==` for known values, so NaN != NaN is true, as in
+        // IEEE 754.
+        for (cond, expected) in [
+            ("test.nan == test.nan", false),
+            ("test.nan != test.nan", true),
+            ("test.nan != 1.0", true),
+        ] {
+            let res = evaluate_with_resolver(cond, &resolver).expect("evaluation failed");
+            assert_eq!(res, expected, "{}", cond);
+        }
+    }
+
+    /// A missing attribute resolves to `Value::Null`, and `Null` fails every comparison,
+    /// `!=` included. A rule must not pass because the data it needed was absent.
+    #[test]
+    fn test_null_fails_every_comparison() {
+        struct EmptyResolver;
+        impl HelResolver for EmptyResolver {
+            fn resolve_attr(&self, _: &str, _: &str) -> Option<Value> {
+                None
+            }
+        }
+
+        let resolver = EmptyResolver;
+        for cond in [
+            "test.missing == 5",
+            "test.missing != 5",
+            "test.missing == test.other_missing",
+            "test.missing != test.other_missing",
+            "test.missing > 5",
+            "test.missing <= 5",
+            r#"test.missing CONTAINS "x""#,
+            r#"test.missing IN ["x"]"#,
+            "5 != test.missing",
+            r#""x" != test.missing"#,
+        ] {
+            let res = evaluate_with_resolver(cond, &resolver).expect("evaluation failed");
+            assert!(!res, "{} should be false for a missing attribute", cond);
+        }
+    }
+
+    /// The nesting cap turns a would-be stack overflow into an ordinary parse error, in
+    /// every entry point that parses.
+    #[test]
+    fn test_deep_nesting_is_a_parse_error() {
+        for depth in [200, 5_000] {
+            let mut expr = String::new();
+            expr.extend(std::iter::repeat_n('(', depth));
+            expr.push_str("x == 1");
+            expr.extend(std::iter::repeat_n(')', depth));
+
+            assert!(validate_expression(&expr).is_err(), "depth {}", depth);
+            assert!(parse_expression(&expr).is_err(), "depth {}", depth);
+        }
+
+        // Brackets inside string literals do not count towards the cap.
+        let parens_in_string = format!("\"{}\" == \"{}\"", "(".repeat(150), ")".repeat(150));
+        assert!(validate_expression(&parens_in_string).is_ok());
+
+        // Just under the cap still parses.
+        let mut ok_expr = String::new();
+        ok_expr.extend(std::iter::repeat_n('(', 128));
+        ok_expr.push_str("x == 1");
+        ok_expr.extend(std::iter::repeat_n(')', 128));
+        assert!(validate_expression(&ok_expr).is_ok());
     }
 
     // ========================================================================
@@ -1838,7 +1971,7 @@ mod tests {
         assert_eq!(retrieved, Some(&Value::Bool(true)));
 
         let identifier = AstNode::Identifier(Arc::from("has_perms"));
-        let result = eval_node_to_value_with_context(&identifier, &eval_ctx).unwrap();
+        let result = eval_node_to_value_with_context(&identifier, &eval_ctx, None).unwrap();
         assert_eq!(result, Value::Bool(true));
     }
 }

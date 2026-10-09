@@ -55,12 +55,11 @@ impl EvalTrace {
     }
 
     /// Add an atom trace
+    ///
+    /// Fact paths are not taken from the atom's text: they are collected from the AST while
+    /// the expression is evaluated (see [`EvalTrace::facts_used`]), so an atom added by hand
+    /// does not contribute to `facts_used`.
     pub fn add_atom(&mut self, atom: AtomTrace) {
-        // Track fact paths from left side (attributes)
-        if atom.left.contains('.') {
-            self.facts_used_set.insert(atom.left.clone());
-        }
-
         self.atoms.push(atom);
     }
 
@@ -70,6 +69,11 @@ impl EvalTrace {
     }
 
     /// Get facts used (sorted for determinism)
+    ///
+    /// The `object.field` attributes the evaluation actually read: those on either side of
+    /// a comparison and those inside function-call arguments and list/map literals. A
+    /// function name is never a fact path, and an attribute in an `AND`/`OR` branch that
+    /// short-circuited is not reported, because it was never read.
     #[must_use]
     pub fn facts_used(&self) -> Vec<String> {
         let mut facts: Vec<String> = self.facts_used_set.iter().cloned().collect();
@@ -143,7 +147,7 @@ pub fn evaluate_with_trace(
 }
 
 /// Evaluate AST node with trace capture
-fn evaluate_ast_with_trace(
+pub(crate) fn evaluate_ast_with_trace(
     ast: &AstNode,
     ctx: &EvalContext,
     trace: &mut EvalTrace,
@@ -169,7 +173,20 @@ fn evaluate_ast_with_trace(
         AstNode::Comparison { left, op, right } => {
             evaluate_comparison_with_trace(left, *op, right, ctx, trace)
         }
-        _ => Ok(false),
+        // Any other node is a value rather than a condition, so it is only usable as a
+        // condition when that value is itself a boolean. The same rule the ordinary
+        // evaluator applies, so traced and untraced evaluation cannot disagree.
+        other => {
+            let value = crate::eval_node_to_value_with_context(other, ctx, Some(trace))?;
+            match value {
+                Value::Bool(b) => Ok(b),
+                _ => Err(EvalError::TypeMismatch {
+                    expected: "boolean".to_string(),
+                    got: format!("{:?}", value),
+                    context: "boolean expression context".to_string(),
+                }),
+            }
+        }
     }
 }
 
@@ -181,10 +198,15 @@ fn evaluate_comparison_with_trace(
     ctx: &EvalContext,
     trace: &mut EvalTrace,
 ) -> Result<bool, EvalError> {
-    let left_val = crate::eval_node_to_value_with_context(left, ctx)?;
-    let right_val = crate::eval_node_to_value_with_context(right, ctx)?;
+    let left_val = crate::eval_node_to_value_with_context(left, ctx, Some(&mut *trace))?;
+    let right_val = crate::eval_node_to_value_with_context(right, ctx, Some(&mut *trace))?;
 
     let result = crate::compare_new_values(&left_val, &right_val, op);
+
+    // Fact paths come from the AST - both sides of the comparison, including attributes
+    // inside arguments and literals - not from the atoms' display strings.
+    collect_fact_paths(left, &mut trace.facts_used_set);
+    collect_fact_paths(right, &mut trace.facts_used_set);
 
     let atom = AtomTrace {
         left: node_to_string(left),
@@ -198,6 +220,35 @@ fn evaluate_comparison_with_trace(
     trace.add_atom(atom);
 
     Ok(result)
+}
+
+/// Collect the fact paths (`object.field` attributes) in a value-position AST subtree:
+/// either side of a comparison, list/map literal elements and function-call arguments.
+/// Conditions (`Comparison`/`And`/`Or`) stop the walk - they are evaluated through
+/// [`evaluate_ast_with_trace`], which records their facts as they are actually reached, so
+/// an `AND`/`OR` branch that short-circuits is not reported.
+fn collect_fact_paths(node: &AstNode, out: &mut std::collections::HashSet<String>) {
+    match node {
+        AstNode::Attribute { object, field } => {
+            out.insert(format!("{}.{}", object, field));
+        }
+        AstNode::ListLiteral(elements) => {
+            for element in elements {
+                collect_fact_paths(element, out);
+            }
+        }
+        AstNode::MapLiteral(entries) => {
+            for (_, value) in entries {
+                collect_fact_paths(value, out);
+            }
+        }
+        AstNode::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_fact_paths(arg, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Convert an AST node to a string representation
@@ -404,6 +455,97 @@ mod tests {
         // Should be sorted for determinism
         assert_eq!(facts_used[0], "binary.format");
         assert_eq!(facts_used[1], "security.nx_enabled");
+    }
+
+    /// The traced evaluator must agree with the ordinary one: a standalone boolean call is
+    /// evaluated through the registry, not silently reported as false.
+    #[test]
+    fn test_trace_standalone_call_matches_plain_evaluation() {
+        let mut registry = crate::builtins::BuiltinsRegistry::new();
+        registry
+            .register(&crate::builtins::CoreBuiltinsProvider)
+            .expect("register failed");
+
+        let conditions = [
+            r#"core.contains(["a"], "a")"#,
+            r#"core.contains(["a"], "b")"#,
+            "core.is_null(missing.attr)",
+            r#"(binary.format == "elf") == true"#,
+        ];
+
+        for condition in conditions {
+            let plain = crate::evaluate_with_context(condition, &TestResolver, &registry)
+                .unwrap_or_else(|e| panic!("plain eval failed for {}: {:?}", condition, e));
+            let traced = evaluate_with_trace(condition, &TestResolver, Some(&registry))
+                .unwrap_or_else(|e| panic!("traced eval failed for {}: {:?}", condition, e));
+            assert_eq!(plain, traced.result, "{}", condition);
+        }
+    }
+
+    /// A value that is not a boolean is a type error on both paths, not a silent false.
+    #[test]
+    fn test_trace_non_boolean_condition_errors_like_plain() {
+        let mut registry = crate::builtins::BuiltinsRegistry::new();
+        registry
+            .register(&crate::builtins::CoreBuiltinsProvider)
+            .expect("register failed");
+
+        for condition in [r#"core.len(["a"])"#, r#""just a string""#] {
+            let plain = crate::evaluate_with_context(condition, &TestResolver, &registry);
+            let traced = evaluate_with_trace(condition, &TestResolver, Some(&registry));
+            assert!(
+                matches!(plain, Err(EvalError::TypeMismatch { .. })),
+                "plain {:?} for {}",
+                plain,
+                condition
+            );
+            assert!(
+                matches!(traced, Err(EvalError::TypeMismatch { .. })),
+                "traced {:?} for {}",
+                traced,
+                condition
+            );
+        }
+    }
+
+    /// Facts are collected from the AST: both sides of a comparison and inside call
+    /// arguments, and never a function name.
+    #[test]
+    fn test_trace_facts_used_from_both_sides_and_args() {
+        let mut registry = crate::builtins::BuiltinsRegistry::new();
+        registry
+            .register(&crate::builtins::CoreBuiltinsProvider)
+            .expect("register failed");
+
+        let trace = evaluate_with_trace("a.x == b.y", &TestResolver, None).expect("evaluated");
+        assert_eq!(
+            trace.facts_used(),
+            vec!["a.x".to_string(), "b.y".to_string()]
+        );
+
+        // An attribute inside a call argument is a real dependency.
+        let trace = evaluate_with_trace(
+            r#"core.is_null(security.nx) == false"#,
+            &TestResolver,
+            Some(&registry),
+        )
+        .expect("evaluated");
+        assert_eq!(trace.facts_used(), vec!["security.nx".to_string()]);
+
+        // A call with no attribute anywhere reads no facts at all.
+        let trace = evaluate_with_trace(
+            r#"core.len(["a", "b"]) == 2"#,
+            &TestResolver,
+            Some(&registry),
+        )
+        .expect("evaluated");
+        assert!(trace.facts_used().is_empty());
+
+        // A nested condition's attributes are recorded too.
+        let trace = evaluate_with_trace(r#"(binary.format == "elf") == true"#, &TestResolver, None)
+            .expect("evaluated");
+        assert_eq!(trace.facts_used(), vec!["binary.format".to_string()]);
+        assert_eq!(trace.atoms.len(), 2, "nested condition records its atom");
     }
 }
 

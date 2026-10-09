@@ -153,6 +153,7 @@ impl ArenaParser {
     /// assert!(format!("{ast:?}").contains("And"));
     /// ```
     pub fn parse_rule<'a>(&'a self, input: &str) -> &'a AstNode<'a> {
+        crate::check_nesting(input).unwrap_or_else(|e| panic!("Failed to parse expression: {}", e));
         let mut pairs = HelParser::parse(Rule::top, input)
             .unwrap_or_else(|e| panic!("Failed to parse expression: {}", e));
         self.build_ast_arena(pairs.next().unwrap())
@@ -224,13 +225,21 @@ impl ArenaParser {
                 }
             }
 
-            Rule::comparison => {
+            Rule::comparison_term => {
                 let mut inner = pair.into_inner();
                 let left = self.build_ast_arena(inner.next().expect("Missing left operand"));
-                let op = parse_comparator(inner.next().expect("Missing comparator"));
-                let right = self.build_ast_arena(inner.next().expect("Missing right operand"));
 
-                AstNode::Comparison { left, op, right }
+                // The comparator and right operand are absent for a bare primary.
+                match inner.next() {
+                    Some(op_pair) => {
+                        let op = parse_comparator(op_pair);
+                        let right =
+                            self.build_ast_arena(inner.next().expect("Missing right operand"));
+
+                        AstNode::Comparison { left, op, right }
+                    }
+                    None => *left,
+                }
             }
 
             Rule::attribute_access => {
@@ -327,7 +336,7 @@ impl ArenaParser {
                 AstNode::Identifier(self.arena.alloc_str(pair.as_str()))
             }
 
-            Rule::primary | Rule::comparison_term | Rule::term | Rule::parenthesized => {
+            Rule::primary | Rule::term | Rule::parenthesized => {
                 return self.build_ast_arena(pair.into_inner().next().expect("Empty wrapper"));
             }
 
@@ -948,6 +957,11 @@ mod tests {
             r#"data.y == "test""#,
             r#"list.items CONTAINS 2"#,
             r#"(vars.x > 40) OR (data.y != "test")"#,
+            // Missing attributes resolve to Null and must fail every comparison on both
+            // paths - `!=` included, and Null against Null.
+            r#"missing.fact != 1"#,
+            r#"missing.a == missing.b"#,
+            r#"missing.a != missing.b"#,
         ];
 
         for expr in test_cases {

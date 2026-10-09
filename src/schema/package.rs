@@ -4,6 +4,8 @@
 //! version and its dependencies. [`PackageRegistry`] loads packages from search paths, resolves
 //! their dependencies, and merges their types into one environment with every type qualified by
 //! its package name (`security-binary.Binary`), so two packages may define the same short name.
+//! Manifest `schemas` entries are literal file paths, and dependency version requirements are
+//! recorded but not enforced: resolution selects packages by name only.
 //!
 //! Loading and resolution iterate `BTreeMap`s, so the order of packages, types and error
 //! messages is the same run to run.
@@ -24,9 +26,12 @@ pub struct PackageManifest {
     pub name: String,
     /// Semver version string
     pub version: String,
-    /// List of schema files to load (in order) or glob pattern
+    /// Schema files to load, in manifest order, as paths relative to the package directory.
+    /// Entries are literal paths; glob patterns are not expanded.
     pub schemas: Vec<String>,
-    /// Dependencies: package_name -> version_requirement
+    /// Dependencies: package_name -> version_requirement. Version requirements are recorded
+    /// but not enforced - resolution selects packages by name only; see
+    /// [`PackageRegistry::load_package`].
     #[serde(default)]
     pub dependencies: BTreeMap<String, String>,
     /// Optional built-ins namespace (defaults to package name)
